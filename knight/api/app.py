@@ -1,15 +1,18 @@
 import os
 
-from api.config import settings
-from api.routers.health import router as health_router
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from knight.api.config import settings
+from knight.api.routers.health import router as health_router
+
+
 app = FastAPI(
-    title=settings.title, description=settings.description, version=settings.version
+    title=settings.title,
+    description=settings.description,
+    version=settings.version,
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("ALLOWED_ORIGINS") or [],
@@ -18,5 +21,4 @@ app.add_middleware(
     allow_headers=settings.cors_headers,
 )
 
-# Include routes
 app.include_router(health_router, prefix=settings.api_base_prefix)

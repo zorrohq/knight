@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from models.api.health import HealthResponse
+from knight.models.api.health import HealthResponse
 
 router = APIRouter(tags=["Health"])
 

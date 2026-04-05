@@ -12,6 +12,8 @@ class APISettings(BaseSettings):
     log_level: str = "info"
 
     api_base_prefix: str = "/api"
+    cors_methods: list[str] = ["*"]
+    cors_headers: list[str] = ["*"]
 
 
 settings = APISettings()
