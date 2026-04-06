@@ -1,7 +1,14 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class APISettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=(".env", ".env.example"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_prefix="API_",
+    )
+
     title: str = "Knight"
     description: str = "Autonomous Background Agents"
     version: str = "0.1.0"
