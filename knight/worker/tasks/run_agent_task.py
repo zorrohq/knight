@@ -1,6 +1,8 @@
 from collections.abc import Mapping
 from typing import Any
 
+from knight.agents.models import AgentTaskRequest
+from knight.agents.service import CodingAgentService
 from knight.worker.celery_app import celery_app
 
 
@@ -11,16 +13,18 @@ from knight.worker.celery_app import celery_app
 def run_agent_task(
     self, payload: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
-    task_payload = {
-        "repository_url": "",
-        "task_type": "repository_task",
-        "instructions": "",
-    }
-    if payload:
-        task_payload.update(payload)
+    task = AgentTaskRequest.model_validate(payload or {})
+    agent = CodingAgentService()
+    result = agent.run(task)
 
     return {
         "task_id": self.request.id,
-        "status": "accepted",
-        "payload": dict(task_payload),
+        "status": result.status,
+        "provider_configured": result.provider_configured,
+        "final_message": result.final_message,
+        "iterations": result.iterations,
+        "task": result.task.model_dump(),
+        "available_tools": result.available_tools,
+        "workspace_summary": result.workspace_summary,
+        "steps": [step.model_dump() for step in result.steps],
     }
