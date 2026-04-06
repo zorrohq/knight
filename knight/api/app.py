@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from knight.api.config import settings
 from knight.api.routers.health import router as health_router
+from knight.api.routers.webhooks import router as webhook_router
 
 
 app = FastAPI(
@@ -22,3 +23,4 @@ app.add_middleware(
 )
 
 app.include_router(health_router, prefix=settings.api_base_prefix)
+app.include_router(webhook_router, prefix=settings.api_base_prefix)
