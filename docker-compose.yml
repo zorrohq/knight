@@ -13,9 +13,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["fastapi", "run", "knight/api/app.py", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["fastapi", "run", "knight/api/app.py"]
     env_file:
-      - .env.example
+      - .env
     ports:
       - "8000:8000"
     depends_on:
@@ -36,7 +36,7 @@ services:
         "--queues=knight.default",
       ]
     env_file:
-      - .env.example
+      - .env
     depends_on:
       redis:
         condition: service_healthy

@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class APISettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", ".env.example"),
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
         env_prefix="API_",
