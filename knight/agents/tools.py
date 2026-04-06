@@ -146,3 +146,6 @@ class AgentToolset:
                 args_schema=RunCommandInput,
             ),
         ]
+
+    def build_tool_map(self) -> dict[str, StructuredTool]:
+        return {tool.name: tool for tool in self.build_tools()}

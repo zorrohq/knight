@@ -34,3 +34,5 @@ class AgentRunResult(BaseModel):
     available_tools: list[ToolName]
     workspace_summary: dict[str, Any] = Field(default_factory=dict)
     steps: list[ToolResult] = Field(default_factory=list)
+    final_message: str = ""
+    iterations: int = 0
