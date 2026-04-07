@@ -5,12 +5,14 @@ from knight.agents.models import AgentTaskRequest
 from knight.runtime.worktree import WorktreeProvisioner
 from knight.worker.commit_message import CommitMessageService
 from knight.worker.config import settings
+from knight.worker.state_store import BranchStateStore
 
 
 class WorkerGitOpsService:
     def __init__(self) -> None:
         self.commit_messages = CommitMessageService()
         self.provisioner = WorktreeProvisioner()
+        self.state_store = BranchStateStore()
 
     def finalize_task(
         self,
@@ -62,6 +64,15 @@ class WorkerGitOpsService:
             self.provisioner.remove_worktree(
                 repo_path=repo_path,
                 worktree_path=worktree_path,
+            )
+
+        repository_identity = task.repository_url or task.repository_local_path
+        if repository_identity and task.issue_id:
+            self.state_store.mark_branch_status(
+                repository=repository_identity,
+                issue_id=task.issue_id,
+                agent_branch=sandbox["branch_name"],
+                status="open",
             )
 
         return {

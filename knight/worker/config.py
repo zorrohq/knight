@@ -17,6 +17,7 @@ class WorkerSettings(BaseSettings):
     celery_accept_content: list[str] = ["json"]
     celery_timezone: str = "UTC"
     worker_sandbox_root: str = ".knight/sandboxes"
+    worker_state_store_path: str = ".knight/state/agent_branches.json"
     worker_default_base_branch: str = "main"
     worker_git_user_name: str = "Knight Bot"
     worker_git_user_email: str = "knight@example.com"
