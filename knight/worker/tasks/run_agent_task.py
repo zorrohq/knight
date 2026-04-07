@@ -4,6 +4,7 @@ from typing import Any
 from knight.agents.models import AgentTaskRequest
 from knight.agents.service import CodingAgentService
 from knight.worker.celery_app import celery_app
+from knight.worker.runtime import WorkerRuntimeService
 
 
 @celery_app.task(
@@ -14,8 +15,10 @@ def run_agent_task(
     self, payload: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
     task = AgentTaskRequest.model_validate(payload or {})
+    runtime = WorkerRuntimeService()
+    prepared_task, sandbox = runtime.prepare_task(task)
     agent = CodingAgentService()
-    result = agent.run(task)
+    result = agent.run(prepared_task, sandbox=sandbox)
 
     return {
         "task_id": self.request.id,

@@ -12,17 +12,19 @@ from knight.agents.state import AgentState
 from knight.agents.tools import AgentToolset
 from knight.runtime.command_runner import LocalCommandRunner
 from knight.runtime.filesystem import LocalWorkspace
-from knight.runtime.worktree import WorktreeProvisioner
 
 
-def build_initial_state(task: AgentTaskRequest) -> AgentState:
+def build_initial_state(
+    task: AgentTaskRequest,
+    sandbox: dict[str, object] | None = None,
+) -> AgentState:
     provider_configured = bool(settings.agent_provider and settings.agent_model)
     return {
         "task": task,
+        "sandbox": dict(sandbox or {}),
         "provider_configured": provider_configured,
         "available_tools": [],
         "workspace_summary": {},
-        "sandbox": {},
         "steps": [],
         "messages": [HumanMessage(content=task.instructions)],
         "status": "pending",
@@ -57,34 +59,6 @@ def get_toolset(state: AgentState) -> AgentToolset:
         workspace=LocalWorkspace(workspace_path),
         command_runner=LocalCommandRunner(),
     )
-
-
-def prepare_sandbox(state: AgentState) -> AgentState:
-    task = state["task"]
-    provisioner = WorktreeProvisioner()
-    sandbox = provisioner.prepare_worktree(
-        repository_url=task.repository_url,
-        repository_local_path=task.repository_local_path,
-        issue_id=task.issue_id or "default",
-        base_branch=task.base_branch,
-        branch_name=task.branch_name,
-    )
-    task.workspace_path = str(sandbox.worktree_path)
-
-    return {
-        **state,
-        "task": task,
-        "sandbox": {
-            "repository_key": sandbox.repository_key,
-            "issue_key": sandbox.issue_key,
-            "branch_name": sandbox.branch_name,
-            "sandbox_root": str(sandbox.sandbox_root),
-            "repo_path": str(sandbox.repo_path),
-            "worktree_path": str(sandbox.worktree_path),
-        },
-        "status": "sandbox_prepared",
-    }
-
 
 def inspect_workspace(state: AgentState) -> AgentState:
     toolset = get_toolset(state)
@@ -250,13 +224,11 @@ def finalize(state: AgentState) -> AgentState:
 
 def build_agent_graph():
     graph = StateGraph(AgentState)
-    graph.add_node("prepare_sandbox", prepare_sandbox)
     graph.add_node("inspect_workspace", inspect_workspace)
     graph.add_node("call_model", call_model)
     graph.add_node("execute_tools", execute_tools)
     graph.add_node("finalize", finalize)
-    graph.add_edge(START, "prepare_sandbox")
-    graph.add_edge("prepare_sandbox", "inspect_workspace")
+    graph.add_edge(START, "inspect_workspace")
     graph.add_conditional_edges(
         "inspect_workspace",
         lambda state: "call_model" if state["provider_configured"] else "finalize",
@@ -282,8 +254,12 @@ class AgentGraphRunner:
     def __init__(self) -> None:
         self.graph = build_agent_graph()
 
-    def run(self, task: AgentTaskRequest) -> AgentRunResult:
-        final_state = self.graph.invoke(build_initial_state(task))
+    def run(
+        self,
+        task: AgentTaskRequest,
+        sandbox: dict[str, object] | None = None,
+    ) -> AgentRunResult:
+        final_state = self.graph.invoke(build_initial_state(task, sandbox=sandbox))
         return AgentRunResult(
             status=final_state["status"],
             provider_configured=final_state["provider_configured"],
