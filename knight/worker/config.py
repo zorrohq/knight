@@ -18,6 +18,9 @@ class WorkerSettings(BaseSettings):
     celery_timezone: str = "UTC"
     worker_sandbox_root: str = ".knight/sandboxes"
     worker_default_base_branch: str = "main"
+    worker_git_user_name: str = "Knight Bot"
+    worker_git_user_email: str = "knight@example.com"
+    worker_commit_max_diff_chars: int = 20000
 
 
 settings = WorkerSettings()

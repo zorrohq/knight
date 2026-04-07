@@ -21,6 +21,10 @@ class AgentTaskRequest(BaseModel):
     issue_id: str = ""
     base_branch: str = "main"
     branch_name: str = ""
+    push_remote: str = "origin"
+    commit_changes: bool = True
+    push_changes: bool = True
+    cleanup_worktree: bool = True
     workspace_path: str = "."
     task_type: str = "repository_task"
     instructions: str = ""

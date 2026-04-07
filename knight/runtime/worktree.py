@@ -41,6 +41,7 @@ class WorktreeSandbox:
     repository_key: str
     issue_key: str
     branch_name: str
+    base_branch: str
     sandbox_root: Path
     repo_path: Path
     worktree_path: Path
@@ -56,6 +57,7 @@ class WorktreeProvisioner:
         *,
         repository_url: str,
         repository_local_path: str,
+        base_branch: str,
     ) -> RepositorySandbox:
         repository_key = _repository_key(repository_url, repository_local_path)
         sandbox_root = self.sandbox_root / repository_key
@@ -70,6 +72,8 @@ class WorktreeProvisioner:
                 repository_local_path=repository_local_path,
                 destination=repo_path,
             )
+        else:
+            self.refresh_repository(repo_path=repo_path, base_branch=base_branch)
 
         return RepositorySandbox(
             repository_key=repository_key,
@@ -90,27 +94,84 @@ class WorktreeProvisioner:
         repository = self.prepare_repository(
             repository_url=repository_url,
             repository_local_path=repository_local_path,
+            base_branch=base_branch or settings.worker_default_base_branch,
         )
         issue_key = _slugify(issue_id)
         resolved_branch = branch_name or f"knight/{issue_key}"
         worktree_path = repository.worktrees_root / issue_key
+        branch_ref = self.sync_branch_reference(
+            repo_path=repository.repo_path,
+            branch_name=resolved_branch,
+            base_branch=base_branch or settings.worker_default_base_branch,
+        )
 
-        if not worktree_path.exists():
-            self._create_worktree(
-                repo_path=repository.repo_path,
-                worktree_path=worktree_path,
-                branch_name=resolved_branch,
-                base_branch=base_branch or settings.worker_default_base_branch,
-            )
+        self.prepare_branch_worktree(
+            repo_path=repository.repo_path,
+            worktree_path=worktree_path,
+            branch_name=resolved_branch,
+            branch_ref=branch_ref,
+            base_branch=base_branch or settings.worker_default_base_branch,
+        )
 
         return WorktreeSandbox(
             repository_key=repository.repository_key,
             issue_key=issue_key,
             branch_name=resolved_branch,
+            base_branch=base_branch or settings.worker_default_base_branch,
             sandbox_root=repository.sandbox_root,
             repo_path=repository.repo_path,
             worktree_path=worktree_path,
         )
+
+    def refresh_repository(self, *, repo_path: Path, base_branch: str) -> None:
+        resolved_base = base_branch or settings.worker_default_base_branch
+        self._run(["git", "fetch", "--all", "--prune"], cwd=repo_path)
+        reset_target = self._resolve_remote_branch(repo_path, resolved_base)
+        self._run(["git", "checkout", "-B", resolved_base, reset_target], cwd=repo_path)
+        self._run(["git", "reset", "--hard", reset_target], cwd=repo_path)
+        self._run(["git", "clean", "-fd"], cwd=repo_path)
+
+    def prepare_branch_worktree(
+        self,
+        *,
+        repo_path: Path,
+        worktree_path: Path,
+        branch_name: str,
+        branch_ref: str | None,
+        base_branch: str,
+    ) -> None:
+        start_point = branch_ref or self._resolve_remote_branch(repo_path, base_branch)
+        if worktree_path.exists():
+            self._checkout_existing_worktree_branch(
+                worktree_path=worktree_path,
+                branch_name=branch_name,
+                branch_ref=branch_ref,
+                start_point=start_point,
+            )
+            self._run(["git", "reset", "--hard", start_point], cwd=worktree_path)
+            self._run(["git", "clean", "-fd"], cwd=worktree_path)
+            return
+
+        self._create_worktree(
+            repo_path=repo_path,
+            worktree_path=worktree_path,
+            branch_name=branch_name,
+            start_point=start_point,
+            branch_ref=branch_ref,
+        )
+
+    def remove_worktree(self, *, repo_path: Path, worktree_path: Path) -> None:
+        if not worktree_path.exists():
+            return
+        completed = subprocess.run(
+            ["git", "worktree", "remove", "--force", str(worktree_path)],
+            cwd=repo_path,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode != 0 and worktree_path.exists():
+            shutil.rmtree(worktree_path, ignore_errors=True)
 
     def _clone_repository(
         self,
@@ -144,23 +205,92 @@ class WorktreeProvisioner:
         repo_path: Path,
         worktree_path: Path,
         branch_name: str,
-        base_branch: str,
+        start_point: str,
+        branch_ref: str | None,
     ) -> None:
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
-        self._run(
-            [
+        if branch_ref == branch_name:
+            command = ["git", "worktree", "add", str(worktree_path), branch_name]
+        elif branch_ref:
+            command = [
                 "git",
-                "-C",
-                str(repo_path),
                 "worktree",
                 "add",
                 "-b",
                 branch_name,
                 str(worktree_path),
-                base_branch,
-            ],
-            cwd=repo_path,
+                branch_ref,
+            ]
+        else:
+            command = [
+                "git",
+                "worktree",
+                "add",
+                "-b",
+                branch_name,
+                str(worktree_path),
+                start_point,
+            ]
+        self._run(command, cwd=repo_path)
+
+    def sync_branch_reference(
+        self,
+        *,
+        repo_path: Path,
+        branch_name: str,
+        base_branch: str,
+    ) -> str | None:
+        remote_branch = self._resolve_remote_branch_ref(repo_path, branch_name)
+        if remote_branch:
+            self._run(["git", "branch", "-f", branch_name, remote_branch], cwd=repo_path)
+            return branch_name
+
+        local_branch = self._resolve_local_branch_ref(repo_path, branch_name)
+        if local_branch:
+            return local_branch
+
+        return None
+
+    def _checkout_existing_worktree_branch(
+        self,
+        *,
+        worktree_path: Path,
+        branch_name: str,
+        branch_ref: str | None,
+        start_point: str,
+    ) -> None:
+        if branch_ref == branch_name:
+            self._run(["git", "checkout", branch_name], cwd=worktree_path)
+            return
+
+        self._run(
+            ["git", "checkout", "-B", branch_name, start_point],
+            cwd=worktree_path,
         )
+
+    def _resolve_local_branch_ref(self, repo_path: Path, branch_name: str) -> str | None:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--verify", branch_name],
+            cwd=repo_path,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return branch_name if completed.returncode == 0 else None
+
+    def _resolve_remote_branch_ref(self, repo_path: Path, branch_name: str) -> str | None:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--verify", f"origin/{branch_name}"],
+            cwd=repo_path,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return f"origin/{branch_name}" if completed.returncode == 0 else None
+
+    def _resolve_remote_branch(self, repo_path: Path, base_branch: str) -> str:
+        remote_branch = self._resolve_remote_branch_ref(repo_path, base_branch)
+        return remote_branch or base_branch
 
     def _run(self, command: list[str], cwd: Path) -> None:
         completed = subprocess.run(

@@ -1,4 +1,3 @@
-from collections.abc import Mapping
 from typing import Any
 
 from knight.agents.models import AgentTaskRequest
