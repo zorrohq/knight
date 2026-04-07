@@ -40,6 +40,7 @@ def build_system_message(state: AgentState) -> SystemMessage:
         f"Workspace root: {summary.get('root', task.workspace_path)}\n"
         f"Top-level files: {top_level_files or 'none'}\n"
         f"Maximum tool iterations: {settings.agent_max_steps}\n"
+        f"Blocked command prefixes: {', '.join(settings.agent_blocked_command_prefixes)}\n"
         "When you have completed the task, respond with a concise summary and do not "
         "emit any more tool calls."
     )

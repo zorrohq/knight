@@ -9,6 +9,8 @@ ToolName = Literal[
     "write_file",
     "replace_in_file",
     "search_files",
+    "git_status",
+    "git_diff",
     "run_command",
 ]
 

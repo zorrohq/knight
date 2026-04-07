@@ -68,10 +68,11 @@ class LocalWorkspace:
     def search_files(self, pattern: str, path: str = ".") -> str:
         search_root = self.resolve_path(path)
         completed = subprocess.run(
-            ["rg", "-n", pattern, str(search_root)],
+            ["rg", "-n", pattern, "."],
             check=False,
             capture_output=True,
             text=True,
+            cwd=search_root,
         )
         if completed.returncode not in {0, 1}:
             raise RuntimeError(completed.stderr.strip() or "search command failed")
