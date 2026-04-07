@@ -17,6 +17,10 @@ ToolName = Literal[
 
 class AgentTaskRequest(BaseModel):
     repository_url: str = ""
+    repository_local_path: str = ""
+    issue_id: str = ""
+    base_branch: str = "main"
+    branch_name: str = ""
     workspace_path: str = "."
     task_type: str = "repository_task"
     instructions: str = ""
@@ -34,6 +38,7 @@ class AgentRunResult(BaseModel):
     provider_configured: bool
     task: AgentTaskRequest
     available_tools: list[ToolName]
+    sandbox: dict[str, Any] = Field(default_factory=dict)
     workspace_summary: dict[str, Any] = Field(default_factory=dict)
     steps: list[ToolResult] = Field(default_factory=list)
     final_message: str = ""

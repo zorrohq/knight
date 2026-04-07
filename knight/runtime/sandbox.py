@@ -10,6 +10,8 @@ class SandboxPolicyError(ValueError):
 
 
 class SandboxPolicy:
+    readonly_git_subcommands = {"status", "diff"}
+
     def __init__(
         self,
         blocked_command_prefixes: list[str] | None = None,
@@ -27,4 +29,11 @@ class SandboxPolicy:
             if parts[0] == prefix:
                 raise SandboxPolicyError(
                     f"command prefix `{prefix}` is blocked by sandbox policy"
+                )
+
+        if parts[0] == "git":
+            subcommand = parts[1] if len(parts) > 1 else ""
+            if subcommand not in self.readonly_git_subcommands:
+                raise SandboxPolicyError(
+                    "git commands are restricted to read-only status and diff operations"
                 )

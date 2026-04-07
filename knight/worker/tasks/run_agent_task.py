@@ -25,6 +25,7 @@ def run_agent_task(
         "iterations": result.iterations,
         "task": result.task.model_dump(),
         "available_tools": result.available_tools,
+        "sandbox": result.sandbox,
         "workspace_summary": result.workspace_summary,
         "steps": [step.model_dump() for step in result.steps],
     }

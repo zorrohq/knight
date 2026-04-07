@@ -16,6 +16,8 @@ class WorkerSettings(BaseSettings):
     celery_result_serializer: str = "json"
     celery_accept_content: list[str] = ["json"]
     celery_timezone: str = "UTC"
+    worker_sandbox_root: str = ".knight/sandboxes"
+    worker_default_base_branch: str = "main"
 
 
 settings = WorkerSettings()

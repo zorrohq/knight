@@ -12,6 +12,7 @@ from knight.agents.state import AgentState
 from knight.agents.tools import AgentToolset
 from knight.runtime.command_runner import LocalCommandRunner
 from knight.runtime.filesystem import LocalWorkspace
+from knight.runtime.worktree import WorktreeProvisioner
 
 
 def build_initial_state(task: AgentTaskRequest) -> AgentState:
@@ -21,6 +22,7 @@ def build_initial_state(task: AgentTaskRequest) -> AgentState:
         "provider_configured": provider_configured,
         "available_tools": [],
         "workspace_summary": {},
+        "sandbox": {},
         "steps": [],
         "messages": [HumanMessage(content=task.instructions)],
         "status": "pending",
@@ -38,6 +40,8 @@ def build_system_message(state: AgentState) -> SystemMessage:
         f"Task type: {task.task_type}\n"
         f"Repository URL: {task.repository_url or 'not provided'}\n"
         f"Workspace root: {summary.get('root', task.workspace_path)}\n"
+        f"Sandbox root: {state['sandbox'].get('sandbox_root', 'not prepared')}\n"
+        f"Worktree branch: {state['sandbox'].get('branch_name', 'not prepared')}\n"
         f"Top-level files: {top_level_files or 'none'}\n"
         f"Maximum tool iterations: {settings.agent_max_steps}\n"
         f"Blocked command prefixes: {', '.join(settings.agent_blocked_command_prefixes)}\n"
@@ -53,6 +57,33 @@ def get_toolset(state: AgentState) -> AgentToolset:
         workspace=LocalWorkspace(workspace_path),
         command_runner=LocalCommandRunner(),
     )
+
+
+def prepare_sandbox(state: AgentState) -> AgentState:
+    task = state["task"]
+    provisioner = WorktreeProvisioner()
+    sandbox = provisioner.prepare_worktree(
+        repository_url=task.repository_url,
+        repository_local_path=task.repository_local_path,
+        issue_id=task.issue_id or "default",
+        base_branch=task.base_branch,
+        branch_name=task.branch_name,
+    )
+    task.workspace_path = str(sandbox.worktree_path)
+
+    return {
+        **state,
+        "task": task,
+        "sandbox": {
+            "repository_key": sandbox.repository_key,
+            "issue_key": sandbox.issue_key,
+            "branch_name": sandbox.branch_name,
+            "sandbox_root": str(sandbox.sandbox_root),
+            "repo_path": str(sandbox.repo_path),
+            "worktree_path": str(sandbox.worktree_path),
+        },
+        "status": "sandbox_prepared",
+    }
 
 
 def inspect_workspace(state: AgentState) -> AgentState:
@@ -219,11 +250,13 @@ def finalize(state: AgentState) -> AgentState:
 
 def build_agent_graph():
     graph = StateGraph(AgentState)
+    graph.add_node("prepare_sandbox", prepare_sandbox)
     graph.add_node("inspect_workspace", inspect_workspace)
     graph.add_node("call_model", call_model)
     graph.add_node("execute_tools", execute_tools)
     graph.add_node("finalize", finalize)
-    graph.add_edge(START, "inspect_workspace")
+    graph.add_edge(START, "prepare_sandbox")
+    graph.add_edge("prepare_sandbox", "inspect_workspace")
     graph.add_conditional_edges(
         "inspect_workspace",
         lambda state: "call_model" if state["provider_configured"] else "finalize",
@@ -256,6 +289,7 @@ class AgentGraphRunner:
             provider_configured=final_state["provider_configured"],
             task=final_state["task"],
             available_tools=final_state["available_tools"],
+            sandbox=final_state["sandbox"],
             workspace_summary=final_state["workspace_summary"],
             steps=final_state["steps"],
             final_message=final_state["final_message"],
