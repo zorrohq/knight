@@ -104,7 +104,8 @@ Current branch/worktree model:
 
 - branches are reusable
 - worktrees are disposable
-- existing remote branch is intended to be the source of truth
+- existing remote branch is the source of truth
+- local-only agent branches are not treated as durable resumable state
 - new branches are created from a selected base branch
 - worktrees are removed after post-run cleanup if enabled
 
