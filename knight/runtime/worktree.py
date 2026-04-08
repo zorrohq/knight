@@ -226,7 +226,7 @@ class WorktreeProvisioner:
                 "git",
                 "worktree",
                 "add",
-                "-b",
+                "-B",
                 branch_name,
                 str(worktree_path),
                 start_point,
@@ -242,12 +242,7 @@ class WorktreeProvisioner:
     ) -> str | None:
         remote_branch = self._resolve_remote_branch_ref(repo_path, branch_name)
         if remote_branch:
-            self._run(["git", "branch", "-f", branch_name, remote_branch], cwd=repo_path)
-            return branch_name
-
-        local_branch = self._resolve_local_branch_ref(repo_path, branch_name)
-        if local_branch:
-            return local_branch
+            return remote_branch
 
         return None
 
@@ -267,16 +262,6 @@ class WorktreeProvisioner:
             ["git", "checkout", "-B", branch_name, start_point],
             cwd=worktree_path,
         )
-
-    def _resolve_local_branch_ref(self, repo_path: Path, branch_name: str) -> str | None:
-        completed = subprocess.run(
-            ["git", "rev-parse", "--verify", branch_name],
-            cwd=repo_path,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        return branch_name if completed.returncode == 0 else None
 
     def _resolve_remote_branch_ref(self, repo_path: Path, branch_name: str) -> str | None:
         completed = subprocess.run(
