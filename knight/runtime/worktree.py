@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 
+from knight.runtime.locking import RepositoryLockManager
 from knight.worker.config import settings
 
 
@@ -51,6 +52,7 @@ class WorktreeProvisioner:
     def __init__(self, sandbox_root: str | Path | None = None) -> None:
         self.sandbox_root = Path(sandbox_root or settings.worker_sandbox_root).resolve()
         self.sandbox_root.mkdir(parents=True, exist_ok=True)
+        self.lock_manager = RepositoryLockManager()
 
     def prepare_repository(
         self,
@@ -91,27 +93,30 @@ class WorktreeProvisioner:
         base_branch: str,
         branch_name: str = "",
     ) -> WorktreeSandbox:
-        repository = self.prepare_repository(
-            repository_url=repository_url,
-            repository_local_path=repository_local_path,
-            base_branch=base_branch or settings.worker_default_base_branch,
-        )
-        issue_key = _slugify(issue_id)
-        resolved_branch = branch_name or f"knight/{issue_key}"
-        worktree_path = repository.worktrees_root / issue_key
-        branch_ref = self.sync_branch_reference(
-            repo_path=repository.repo_path,
-            branch_name=resolved_branch,
-            base_branch=base_branch or settings.worker_default_base_branch,
-        )
+        repository_key = _repository_key(repository_url, repository_local_path)
+        lock_path = self.sandbox_root / repository_key / ".repo.lock"
+        with self.lock_manager.acquire(lock_path):
+            repository = self.prepare_repository(
+                repository_url=repository_url,
+                repository_local_path=repository_local_path,
+                base_branch=base_branch or settings.worker_default_base_branch,
+            )
+            issue_key = _slugify(issue_id)
+            resolved_branch = branch_name or f"knight/{issue_key}"
+            worktree_path = repository.worktrees_root / issue_key
+            branch_ref = self.sync_branch_reference(
+                repo_path=repository.repo_path,
+                branch_name=resolved_branch,
+                base_branch=base_branch or settings.worker_default_base_branch,
+            )
 
-        self.prepare_branch_worktree(
-            repo_path=repository.repo_path,
-            worktree_path=worktree_path,
-            branch_name=resolved_branch,
-            branch_ref=branch_ref,
-            base_branch=base_branch or settings.worker_default_base_branch,
-        )
+            self.prepare_branch_worktree(
+                repo_path=repository.repo_path,
+                worktree_path=worktree_path,
+                branch_name=resolved_branch,
+                branch_ref=branch_ref,
+                base_branch=base_branch or settings.worker_default_base_branch,
+            )
 
         return WorktreeSandbox(
             repository_key=repository.repository_key,
@@ -163,15 +168,17 @@ class WorktreeProvisioner:
     def remove_worktree(self, *, repo_path: Path, worktree_path: Path) -> None:
         if not worktree_path.exists():
             return
-        completed = subprocess.run(
-            ["git", "worktree", "remove", "--force", str(worktree_path)],
-            cwd=repo_path,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if completed.returncode != 0 and worktree_path.exists():
-            shutil.rmtree(worktree_path, ignore_errors=True)
+        lock_path = repo_path.parent / ".repo.lock"
+        with self.lock_manager.acquire(lock_path):
+            completed = subprocess.run(
+                ["git", "worktree", "remove", "--force", str(worktree_path)],
+                cwd=repo_path,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if completed.returncode != 0 and worktree_path.exists():
+                shutil.rmtree(worktree_path, ignore_errors=True)
 
     def _clone_repository(
         self,
