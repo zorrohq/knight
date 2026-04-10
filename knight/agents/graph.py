@@ -12,6 +12,7 @@ from knight.agents.state import AgentState
 from knight.agents.tools import AgentToolset
 from knight.runtime.command_runner import LocalCommandRunner
 from knight.runtime.filesystem import LocalWorkspace
+from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.sandbox import SandboxPolicy
 
 
@@ -19,7 +20,10 @@ def build_initial_state(
     task: AgentTaskRequest,
     sandbox: dict[str, object] | None = None,
 ) -> AgentState:
-    repository_identity = task.repository_url or task.repository_local_path or None
+    repository_identity = normalize_repository_identity(
+        repository_url=task.repository_url,
+        repository_local_path=task.repository_local_path,
+    ) or None
     runtime_config = AgentConfigResolver().resolve(repository=repository_identity)
     provider_configured = bool(runtime_config.provider and runtime_config.model)
     return {

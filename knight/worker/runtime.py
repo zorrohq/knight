@@ -1,6 +1,7 @@
 from typing import Any
 
 from knight.agents.models import AgentTaskRequest
+from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
 from knight.worker.state_store import BranchRecord, BranchStateStore
 
@@ -14,7 +15,10 @@ class WorkerRuntimeService:
         self,
         task: AgentTaskRequest,
     ) -> tuple[AgentTaskRequest, dict[str, Any]]:
-        repository_identity = task.repository_url or task.repository_local_path
+        repository_identity = normalize_repository_identity(
+            repository_url=task.repository_url,
+            repository_local_path=task.repository_local_path,
+        )
         existing_record = None
         if repository_identity and task.issue_id:
             existing_record = self.state_store.get_open_branch(

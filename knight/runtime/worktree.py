@@ -2,31 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import re
 import shutil
 import subprocess
 
 from knight.runtime.locking import RepositoryLockManager
+from knight.runtime.repository_identity import repository_key
 from knight.worker.config import settings
+import re
 
 
 def _slugify(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", value.strip())
     return cleaned.strip("-._") or "default"
-
-
-def _repository_key(repository_url: str, repository_local_path: str) -> str:
-    if repository_local_path:
-        return _slugify(Path(repository_local_path).resolve().name)
-
-    if repository_url:
-        trimmed = repository_url.rstrip("/").removesuffix(".git")
-        parts = [part for part in trimmed.split("/") if part]
-        if len(parts) >= 2:
-            return _slugify("-".join(parts[-2:]))
-        return _slugify(parts[-1])
-
-    return "default"
 
 
 @dataclass(slots=True)
@@ -61,8 +48,11 @@ class WorktreeProvisioner:
         repository_local_path: str,
         base_branch: str,
     ) -> RepositorySandbox:
-        repository_key = _repository_key(repository_url, repository_local_path)
-        sandbox_root = self.sandbox_root / repository_key
+        resolved_repository_key = repository_key(
+            repository_url=repository_url,
+            repository_local_path=repository_local_path,
+        )
+        sandbox_root = self.sandbox_root / resolved_repository_key
         repo_path = sandbox_root / "repo"
         worktrees_root = sandbox_root / "worktrees"
         sandbox_root.mkdir(parents=True, exist_ok=True)
@@ -78,7 +68,7 @@ class WorktreeProvisioner:
             self.refresh_repository(repo_path=repo_path, base_branch=base_branch)
 
         return RepositorySandbox(
-            repository_key=repository_key,
+            repository_key=resolved_repository_key,
             sandbox_root=sandbox_root,
             repo_path=repo_path,
             worktrees_root=worktrees_root,
@@ -93,8 +83,11 @@ class WorktreeProvisioner:
         base_branch: str,
         branch_name: str = "",
     ) -> WorktreeSandbox:
-        repository_key = _repository_key(repository_url, repository_local_path)
-        lock_path = self.sandbox_root / repository_key / ".repo.lock"
+        resolved_repository_key = repository_key(
+            repository_url=repository_url,
+            repository_local_path=repository_local_path,
+        )
+        lock_path = self.sandbox_root / resolved_repository_key / ".repo.lock"
         with self.lock_manager.acquire(lock_path):
             repository = self.prepare_repository(
                 repository_url=repository_url,
