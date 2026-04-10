@@ -14,10 +14,14 @@ from knight.runtime.command_runner import LocalCommandRunner
 from knight.runtime.filesystem import LocalWorkspace
 
 
-def build_initial_state(task: AgentTaskRequest) -> AgentState:
+def build_initial_state(
+    task: AgentTaskRequest,
+    sandbox: dict[str, object] | None = None,
+) -> AgentState:
     provider_configured = bool(settings.agent_provider and settings.agent_model)
     return {
         "task": task,
+        "sandbox": dict(sandbox or {}),
         "provider_configured": provider_configured,
         "available_tools": [],
         "workspace_summary": {},
@@ -38,8 +42,11 @@ def build_system_message(state: AgentState) -> SystemMessage:
         f"Task type: {task.task_type}\n"
         f"Repository URL: {task.repository_url or 'not provided'}\n"
         f"Workspace root: {summary.get('root', task.workspace_path)}\n"
+        f"Sandbox root: {state['sandbox'].get('sandbox_root', 'not prepared')}\n"
+        f"Worktree branch: {state['sandbox'].get('branch_name', 'not prepared')}\n"
         f"Top-level files: {top_level_files or 'none'}\n"
         f"Maximum tool iterations: {settings.agent_max_steps}\n"
+        f"Blocked command prefixes: {', '.join(settings.agent_blocked_command_prefixes)}\n"
         "When you have completed the task, respond with a concise summary and do not "
         "emit any more tool calls."
     )
@@ -52,7 +59,6 @@ def get_toolset(state: AgentState) -> AgentToolset:
         workspace=LocalWorkspace(workspace_path),
         command_runner=LocalCommandRunner(),
     )
-
 
 def inspect_workspace(state: AgentState) -> AgentState:
     toolset = get_toolset(state)
@@ -248,13 +254,18 @@ class AgentGraphRunner:
     def __init__(self) -> None:
         self.graph = build_agent_graph()
 
-    def run(self, task: AgentTaskRequest) -> AgentRunResult:
-        final_state = self.graph.invoke(build_initial_state(task))
+    def run(
+        self,
+        task: AgentTaskRequest,
+        sandbox: dict[str, object] | None = None,
+    ) -> AgentRunResult:
+        final_state = self.graph.invoke(build_initial_state(task, sandbox=sandbox))
         return AgentRunResult(
             status=final_state["status"],
             provider_configured=final_state["provider_configured"],
             task=final_state["task"],
             available_tools=final_state["available_tools"],
+            sandbox=final_state["sandbox"],
             workspace_summary=final_state["workspace_summary"],
             steps=final_state["steps"],
             final_message=final_state["final_message"],
