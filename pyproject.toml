@@ -11,4 +11,5 @@ dependencies = [
     "langgraph>=1.1.6",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
+    "psycopg[binary]>=3.2.9",
 ]
