@@ -5,23 +5,37 @@ import json
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
-from knight.agents.config import settings
 from knight.agents.llm import create_agent_model
 from knight.agents.models import AgentRunResult, AgentTaskRequest, ToolResult
+from knight.agents.runtime_config import AgentConfigResolver, ResolvedAgentSettings
 from knight.agents.state import AgentState
 from knight.agents.tools import AgentToolset
 from knight.runtime.command_runner import LocalCommandRunner
 from knight.runtime.filesystem import LocalWorkspace
+from knight.runtime.sandbox import SandboxPolicy
 
 
 def build_initial_state(
     task: AgentTaskRequest,
     sandbox: dict[str, object] | None = None,
 ) -> AgentState:
-    provider_configured = bool(settings.agent_provider and settings.agent_model)
+    runtime_config = AgentConfigResolver().resolve()
+    provider_configured = bool(runtime_config.provider and runtime_config.model)
     return {
         "task": task,
         "sandbox": dict(sandbox or {}),
+        "runtime_config": {
+            "provider": runtime_config.provider,
+            "model": runtime_config.model,
+            "temperature": runtime_config.temperature,
+            "max_steps": runtime_config.max_steps,
+            "command_timeout_seconds": runtime_config.command_timeout_seconds,
+            "max_command_output_chars": runtime_config.max_command_output_chars,
+            "blocked_command_prefixes": list(runtime_config.blocked_command_prefixes),
+            "allow_run_command": runtime_config.allow_run_command,
+            "allow_write_files": runtime_config.allow_write_files,
+            "system_prompt": runtime_config.system_prompt,
+        },
         "provider_configured": provider_configured,
         "available_tools": [],
         "workspace_summary": {},
@@ -36,17 +50,20 @@ def build_initial_state(
 def build_system_message(state: AgentState) -> SystemMessage:
     task = state["task"]
     summary = state["workspace_summary"]
+    runtime_config = ResolvedAgentSettings(**state["runtime_config"])
     top_level_files = ", ".join(summary.get("top_level_files", []))
     content = (
-        f"{settings.agent_system_prompt}\n\n"
+        f"{runtime_config.system_prompt}\n\n"
         f"Task type: {task.task_type}\n"
         f"Repository URL: {task.repository_url or 'not provided'}\n"
         f"Workspace root: {summary.get('root', task.workspace_path)}\n"
         f"Sandbox root: {state['sandbox'].get('sandbox_root', 'not prepared')}\n"
         f"Worktree branch: {state['sandbox'].get('branch_name', 'not prepared')}\n"
         f"Top-level files: {top_level_files or 'none'}\n"
-        f"Maximum tool iterations: {settings.agent_max_steps}\n"
-        f"Blocked command prefixes: {', '.join(settings.agent_blocked_command_prefixes)}\n"
+        f"Maximum tool iterations: {runtime_config.max_steps}\n"
+        f"Run command enabled: {runtime_config.allow_run_command}\n"
+        f"Write file tools enabled: {runtime_config.allow_write_files}\n"
+        f"Blocked command prefixes: {', '.join(runtime_config.blocked_command_prefixes)}\n"
         "When you have completed the task, respond with a concise summary and do not "
         "emit any more tool calls."
     )
@@ -54,11 +71,19 @@ def build_system_message(state: AgentState) -> SystemMessage:
 
 
 def get_toolset(state: AgentState) -> AgentToolset:
-    workspace_path = state["task"].workspace_path or settings.agent_workspace_root
+    workspace_path = state["task"].workspace_path or "."
+    runtime_config = ResolvedAgentSettings(**state["runtime_config"])
     return AgentToolset(
         workspace=LocalWorkspace(workspace_path),
-        command_runner=LocalCommandRunner(),
+        command_runner=LocalCommandRunner(
+            policy=SandboxPolicy(
+                blocked_command_prefixes=runtime_config.blocked_command_prefixes,
+            ),
+            max_output_chars=runtime_config.max_command_output_chars,
+        ),
+        runtime_config=runtime_config,
     )
+
 
 def inspect_workspace(state: AgentState) -> AgentState:
     toolset = get_toolset(state)
@@ -91,7 +116,8 @@ def inspect_workspace(state: AgentState) -> AgentState:
 
 
 def call_model(state: AgentState) -> AgentState:
-    model = create_agent_model()
+    runtime_config = ResolvedAgentSettings(**state["runtime_config"])
+    model = create_agent_model(runtime_config)
     if model is None:
         return {
             **state,
@@ -182,10 +208,11 @@ def execute_tools(state: AgentState) -> AgentState:
 
 
 def should_continue(state: AgentState) -> str:
+    runtime_config = ResolvedAgentSettings(**state["runtime_config"])
     if not state["provider_configured"]:
         return "finalize"
 
-    if state["iterations"] >= settings.agent_max_steps:
+    if state["iterations"] >= runtime_config.max_steps:
         return "finalize"
 
     last_message = state["messages"][-1]
@@ -196,6 +223,7 @@ def should_continue(state: AgentState) -> str:
 
 
 def finalize(state: AgentState) -> AgentState:
+    runtime_config = ResolvedAgentSettings(**state["runtime_config"])
     final_message = state["final_message"]
     if state["messages"] and isinstance(state["messages"][-1], AIMessage):
         content = state["messages"][-1].content
@@ -203,7 +231,7 @@ def finalize(state: AgentState) -> AgentState:
             final_message = content
 
     if not final_message:
-        if state["iterations"] >= settings.agent_max_steps:
+        if state["iterations"] >= runtime_config.max_steps:
             final_message = "Agent stopped after reaching the maximum tool iterations."
             status = "max_iterations_reached"
         elif not state["provider_configured"]:

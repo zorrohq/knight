@@ -36,6 +36,7 @@ class WorkerRuntimeService:
             update={
                 "workspace_path": str(sandbox.worktree_path),
                 "branch_name": sandbox.branch_name,
+                "base_branch": sandbox.base_branch,
             }
         )
         if repository_identity and task.issue_id:
@@ -43,7 +44,7 @@ class WorkerRuntimeService:
                 BranchRecord(
                     repository=repository_identity,
                     issue_id=task.issue_id,
-                    base_branch=task.base_branch,
+                    base_branch=sandbox.base_branch,
                     agent_branch=sandbox.branch_name,
                     status="open",
                 )

@@ -53,7 +53,7 @@ class WorkerGitOpsService:
                     "git",
                     "push",
                     "--set-upstream",
-                    task.push_remote,
+                    task.push_remote or "origin",
                     sandbox["branch_name"],
                 ],
                 cwd=worktree_path,

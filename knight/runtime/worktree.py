@@ -101,13 +101,17 @@ class WorktreeProvisioner:
                 repository_local_path=repository_local_path,
                 base_branch=base_branch or settings.worker_default_base_branch,
             )
+            resolved_base_branch = self._resolve_base_branch(
+                repo_path=repository.repo_path,
+                base_branch=base_branch,
+            )
             issue_key = _slugify(issue_id)
             resolved_branch = branch_name or f"knight/{issue_key}"
             worktree_path = repository.worktrees_root / issue_key
             branch_ref = self.sync_branch_reference(
                 repo_path=repository.repo_path,
                 branch_name=resolved_branch,
-                base_branch=base_branch or settings.worker_default_base_branch,
+                base_branch=resolved_base_branch,
             )
 
             self.prepare_branch_worktree(
@@ -115,22 +119,22 @@ class WorktreeProvisioner:
                 worktree_path=worktree_path,
                 branch_name=resolved_branch,
                 branch_ref=branch_ref,
-                base_branch=base_branch or settings.worker_default_base_branch,
+                base_branch=resolved_base_branch,
             )
 
         return WorktreeSandbox(
             repository_key=repository.repository_key,
             issue_key=issue_key,
             branch_name=resolved_branch,
-            base_branch=base_branch or settings.worker_default_base_branch,
+            base_branch=resolved_base_branch,
             sandbox_root=repository.sandbox_root,
             repo_path=repository.repo_path,
             worktree_path=worktree_path,
         )
 
     def refresh_repository(self, *, repo_path: Path, base_branch: str) -> None:
-        resolved_base = base_branch or settings.worker_default_base_branch
         self._run(["git", "fetch", "--all", "--prune"], cwd=repo_path)
+        resolved_base = self._resolve_base_branch(repo_path=repo_path, base_branch=base_branch)
         reset_target = self._resolve_remote_branch(repo_path, resolved_base)
         self._run(["git", "checkout", "-B", resolved_base, reset_target], cwd=repo_path)
         self._run(["git", "reset", "--hard", reset_target], cwd=repo_path)
@@ -283,6 +287,44 @@ class WorktreeProvisioner:
     def _resolve_remote_branch(self, repo_path: Path, base_branch: str) -> str:
         remote_branch = self._resolve_remote_branch_ref(repo_path, base_branch)
         return remote_branch or base_branch
+
+    def _resolve_base_branch(self, *, repo_path: Path, base_branch: str) -> str:
+        if base_branch:
+            return base_branch
+
+        remote_default = self._resolve_remote_head_branch(repo_path)
+        if remote_default:
+            return remote_default
+
+        current_branch = self._resolve_current_branch(repo_path)
+        if current_branch:
+            return current_branch
+
+        return settings.worker_default_base_branch
+
+    def _resolve_remote_head_branch(self, repo_path: Path) -> str | None:
+        completed = subprocess.run(
+            ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+            cwd=repo_path,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return None
+        ref = completed.stdout.strip()
+        return ref.split("/", 1)[1] if "/" in ref else ref
+
+    def _resolve_current_branch(self, repo_path: Path) -> str | None:
+        completed = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo_path,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        branch = completed.stdout.strip()
+        return branch or None
 
     def _run(self, command: list[str], cwd: Path) -> None:
         completed = subprocess.run(
