@@ -19,7 +19,8 @@ def build_initial_state(
     task: AgentTaskRequest,
     sandbox: dict[str, object] | None = None,
 ) -> AgentState:
-    runtime_config = AgentConfigResolver().resolve()
+    repository_identity = task.repository_url or task.repository_local_path or None
+    runtime_config = AgentConfigResolver().resolve(repository=repository_identity)
     provider_configured = bool(runtime_config.provider and runtime_config.model)
     return {
         "task": task,
