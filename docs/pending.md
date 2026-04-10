@@ -4,17 +4,18 @@
 
 ## 1. Concurrency And Locking
 
-There is no explicit repository-level locking yet.
+Basic repository-level locking exists, but concurrency hardening is still incomplete.
 
 Why this matters:
 
 - multiple workers may fetch/update the same sandbox repo at the same time
-- worktree creation and branch manipulation can race
-- shared sandbox state can become inconsistent without coordination
+- long-term multi-worker behavior still needs stronger guarantees around lock scope and failure recovery
 
 Pending solution:
 
-- add per-repository locking around fetch/sync/worktree creation and cleanup
+- keep the short-lived per-repo lock model, but harden it for production use
+- define behavior for lock timeouts, stale lock diagnosis, and failure cleanup
+- ensure branch sync and post-run cleanup remain safe under parallel worker load
 
 ## 2. Post-Run Error Handling
 
@@ -172,8 +173,8 @@ There are no automated tests yet for:
 
 Recommended order:
 
-1. add repository-level locking for runtime operations
-2. make post-run commit/push return structured outcomes
-3. add PR creation and persist PR linkage in the state store
+1. make post-run commit/push return structured outcomes
+2. add PR creation and persist PR linkage in the state store
+3. harden repository locking behavior for multi-worker production use
 4. replace JSON persistence with a real database
 5. add tests around worktree lifecycle and branch reuse

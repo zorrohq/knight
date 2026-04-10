@@ -97,6 +97,7 @@ Implemented behavior:
 
 - one persistent sandbox repo per repository under `.knight/sandboxes/<repo-key>/repo`
 - one disposable worktree per issue/run under `.knight/sandboxes/<repo-key>/worktrees/<issue-key>`
+- short-lived per-repo locking around shared git metadata operations
 - the worker prepares the worktree before invoking the agent
 - the agent receives only the prepared workspace path
 
@@ -152,6 +153,7 @@ Current safety controls:
 - blocked command prefixes are configurable
 - agent-issued git commands are restricted to read-only inspection commands
 - command output is truncated to a configured maximum size
+- shared sandbox repo operations are serialized with a file lock during fetch/sync/worktree create-remove phases
 
 ## Docker And Local Runtime
 
