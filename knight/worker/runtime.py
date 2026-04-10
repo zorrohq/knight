@@ -1,0 +1,59 @@
+from typing import Any
+
+from knight.agents.models import AgentTaskRequest
+from knight.runtime.worktree import WorktreeProvisioner
+from knight.worker.state_store import BranchRecord, BranchStateStore
+
+
+class WorkerRuntimeService:
+    def __init__(self) -> None:
+        self.provisioner = WorktreeProvisioner()
+        self.state_store = BranchStateStore()
+
+    def prepare_task(
+        self,
+        task: AgentTaskRequest,
+    ) -> tuple[AgentTaskRequest, dict[str, Any]]:
+        repository_identity = task.repository_url or task.repository_local_path
+        existing_record = None
+        if repository_identity and task.issue_id:
+            existing_record = self.state_store.get_open_branch(
+                repository=repository_identity,
+                issue_id=task.issue_id,
+            )
+
+        resolved_branch_name = task.branch_name or (
+            existing_record.agent_branch if existing_record else ""
+        )
+        sandbox = self.provisioner.prepare_worktree(
+            repository_url=task.repository_url,
+            repository_local_path=task.repository_local_path,
+            issue_id=task.issue_id or "default",
+            base_branch=task.base_branch,
+            branch_name=resolved_branch_name,
+        )
+        prepared_task = task.model_copy(
+            update={
+                "workspace_path": str(sandbox.worktree_path),
+                "branch_name": sandbox.branch_name,
+            }
+        )
+        if repository_identity and task.issue_id:
+            self.state_store.upsert_branch(
+                BranchRecord(
+                    repository=repository_identity,
+                    issue_id=task.issue_id,
+                    base_branch=task.base_branch,
+                    agent_branch=sandbox.branch_name,
+                    status="open",
+                )
+            )
+        sandbox_metadata = {
+            "repository_key": sandbox.repository_key,
+            "issue_key": sandbox.issue_key,
+            "branch_name": sandbox.branch_name,
+            "sandbox_root": str(sandbox.sandbox_root),
+            "repo_path": str(sandbox.repo_path),
+            "worktree_path": str(sandbox.worktree_path),
+        }
+        return prepared_task, sandbox_metadata

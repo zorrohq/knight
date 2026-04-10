@@ -6,5 +6,9 @@ class CodingAgentService:
     def __init__(self) -> None:
         self.runner = AgentGraphRunner()
 
-    def run(self, task: AgentTaskRequest) -> AgentRunResult:
-        return self.runner.run(task)
+    def run(
+        self,
+        task: AgentTaskRequest,
+        sandbox: dict[str, object] | None = None,
+    ) -> AgentRunResult:
+        return self.runner.run(task, sandbox=sandbox)

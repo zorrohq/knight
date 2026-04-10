@@ -36,6 +36,14 @@ class SearchFilesInput(BaseModel):
     path: str = "."
 
 
+class GitStatusInput(BaseModel):
+    path: str = "."
+
+
+class GitDiffInput(BaseModel):
+    path: str = "."
+
+
 class RunCommandInput(BaseModel):
     command: str
     cwd: str = "."
@@ -90,6 +98,30 @@ class AgentToolset:
     def search_files(self, pattern: str, path: str = ".") -> dict[str, Any]:
         return {"matches": self.workspace.search_files(pattern=pattern, path=path)}
 
+    def git_status(self, path: str = ".") -> dict[str, Any]:
+        result = self.command_runner.run(
+            command="git status --short",
+            cwd=self.workspace.resolve_path(path),
+            timeout_seconds=settings.agent_command_timeout_seconds,
+        )
+        return {
+            "exit_code": result.exit_code,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
+    def git_diff(self, path: str = ".") -> dict[str, Any]:
+        result = self.command_runner.run(
+            command="git diff -- .",
+            cwd=self.workspace.resolve_path(path),
+            timeout_seconds=settings.agent_command_timeout_seconds,
+        )
+        return {
+            "exit_code": result.exit_code,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
     def run_command(
         self,
         command: str,
@@ -140,9 +172,21 @@ class AgentToolset:
                 args_schema=SearchFilesInput,
             ),
             StructuredTool.from_function(
+                func=self.git_status,
+                name="git_status",
+                description="Inspect git status inside the workspace repository.",
+                args_schema=GitStatusInput,
+            ),
+            StructuredTool.from_function(
+                func=self.git_diff,
+                name="git_diff",
+                description="Inspect the current git diff inside the workspace repository.",
+                args_schema=GitDiffInput,
+            ),
+            StructuredTool.from_function(
                 func=self.run_command,
                 name="run_command",
-                description="Run a shell command inside the workspace.",
+                description="Run a shell command inside the workspace, subject to sandbox policy.",
                 args_schema=RunCommandInput,
             ),
         ]

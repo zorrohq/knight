@@ -16,6 +16,14 @@ class WorkerSettings(BaseSettings):
     celery_result_serializer: str = "json"
     celery_accept_content: list[str] = ["json"]
     celery_timezone: str = "UTC"
+    worker_sandbox_root: str = ".knight/sandboxes"
+    worker_state_store_path: str = ".knight/state/agent_branches.json"
+    worker_default_base_branch: str = "main"
+    worker_repo_lock_timeout_seconds: int = 30
+    worker_repo_lock_poll_interval_seconds: float = 0.1
+    worker_git_user_name: str = "Knight Bot"
+    worker_git_user_email: str = "knight@example.com"
+    worker_commit_max_diff_chars: int = 20000
 
 
 settings = WorkerSettings()
