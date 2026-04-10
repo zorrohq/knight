@@ -2,11 +2,14 @@ from pathlib import Path
 import subprocess
 
 from knight.agents.models import AgentTaskRequest
+from knight.runtime.logging_config import get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
 from knight.worker.commit_message import CommitMessageService
 from knight.worker.config import settings
 from knight.worker.state_store import BranchStateStore
+
+logger = get_logger(__name__)
 
 
 class WorkerGitOpsService:
@@ -27,6 +30,18 @@ class WorkerGitOpsService:
         diff_text = self._run(["git", "diff", "--", "."], cwd=worktree_path).stdout
         status_text = self._run(["git", "status", "--short"], cwd=worktree_path).stdout
         has_changes = bool(status_text.strip())
+        logger.info(
+            "worker post-run diff evaluated",
+            extra={
+                "repository": normalize_repository_identity(
+                    repository_url=task.repository_url,
+                    repository_local_path=task.repository_local_path,
+                ),
+                "issue_id": task.issue_id,
+                "branch_name": sandbox["branch_name"],
+                "has_changes": has_changes,
+            },
+        )
 
         commit_message = ""
         commit_created = False
@@ -46,6 +61,17 @@ class WorkerGitOpsService:
             self._run(["git", "add", "--all"], cwd=worktree_path)
             self._run(["git", "commit", "-m", commit_message], cwd=worktree_path)
             commit_created = True
+            logger.info(
+                "worker commit created",
+                extra={
+                    "repository": normalize_repository_identity(
+                        repository_url=task.repository_url,
+                        repository_local_path=task.repository_local_path,
+                    ),
+                    "issue_id": task.issue_id,
+                    "branch_name": sandbox["branch_name"],
+                },
+            )
 
         if commit_created and task.push_changes:
             push_attempted = True
@@ -60,11 +86,35 @@ class WorkerGitOpsService:
                 cwd=worktree_path,
             )
             push_completed = True
+            logger.info(
+                "worker branch pushed",
+                extra={
+                    "repository": normalize_repository_identity(
+                        repository_url=task.repository_url,
+                        repository_local_path=task.repository_local_path,
+                    ),
+                    "issue_id": task.issue_id,
+                    "branch_name": sandbox["branch_name"],
+                    "remote": task.push_remote or "origin",
+                },
+            )
 
         if task.cleanup_worktree:
             self.provisioner.remove_worktree(
                 repo_path=repo_path,
                 worktree_path=worktree_path,
+            )
+            logger.info(
+                "worker worktree cleaned up",
+                extra={
+                    "repository": normalize_repository_identity(
+                        repository_url=task.repository_url,
+                        repository_local_path=task.repository_local_path,
+                    ),
+                    "issue_id": task.issue_id,
+                    "branch_name": sandbox["branch_name"],
+                    "worktree_path": str(worktree_path),
+                },
             )
 
         repository_identity = normalize_repository_identity(

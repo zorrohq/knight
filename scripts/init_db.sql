@@ -42,9 +42,7 @@ CREATE TABLE IF NOT EXISTS app_config (
         CHECK (
             (scope = 'repository' AND repository IS NOT NULL)
             OR (scope <> 'repository' AND repository IS NULL)
-        ),
-    CONSTRAINT app_config_scope_key_repository_unique
-        UNIQUE (scope, key, repository)
+        )
 );
 
 CREATE INDEX IF NOT EXISTS app_config_scope_key_idx
@@ -54,12 +52,89 @@ CREATE INDEX IF NOT EXISTS app_config_repository_key_idx
     ON app_config (repository, key)
     WHERE repository IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS app_config_global_scope_key_unique_idx
+    ON app_config (scope, key)
+    WHERE repository IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS app_config_repository_scope_key_repo_unique_idx
+    ON app_config (scope, repository, key)
+    WHERE repository IS NOT NULL;
+
 DELETE FROM app_config
 WHERE scope = 'global'
-  AND key IN ('default_base_branch', 'default_push_remote');
+  AND key IN (
+      'default_base_branch',
+      'default_push_remote',
+      'logging_level',
+      'logging_format',
+      'logging_include_timestamp',
+      'logging_include_logger_name',
+      'logging_include_process',
+      'logging_log_tool_results',
+      'logging_log_command_output',
+      'agent_provider',
+      'agent_model',
+      'agent_temperature',
+      'agent_max_steps',
+      'agent_command_timeout_seconds',
+      'agent_max_command_output_chars',
+      'agent_blocked_command_prefixes',
+      'agent_allow_run_command',
+      'agent_allow_write_files',
+      'agent_system_prompt'
+  );
 
 INSERT INTO app_config (scope, repository, key, value, description)
 VALUES
+    (
+        'global',
+        NULL,
+        'logging_level',
+        '"INFO"'::jsonb,
+        'Root application log level.'
+    ),
+    (
+        'global',
+        NULL,
+        'logging_format',
+        '"text"'::jsonb,
+        'Log formatter type. Allowed values are text or json.'
+    ),
+    (
+        'global',
+        NULL,
+        'logging_include_timestamp',
+        'true'::jsonb,
+        'Whether log lines include timestamps.'
+    ),
+    (
+        'global',
+        NULL,
+        'logging_include_logger_name',
+        'true'::jsonb,
+        'Whether log lines include the logger name.'
+    ),
+    (
+        'global',
+        NULL,
+        'logging_include_process',
+        'true'::jsonb,
+        'Whether log lines include the process id.'
+    ),
+    (
+        'global',
+        NULL,
+        'logging_log_tool_results',
+        'true'::jsonb,
+        'Whether agent tool execution summaries are emitted to logs.'
+    ),
+    (
+        'global',
+        NULL,
+        'logging_log_command_output',
+        'false'::jsonb,
+        'Whether command stdout and stderr are included in logs.'
+    ),
     (
         'global',
         NULL,
@@ -130,4 +205,8 @@ VALUES
         '"You are Knight, an autonomous software engineering agent. Work iteratively: inspect the repository, read files before editing, prefer targeted edits over broad rewrites, run commands when needed, and stop once the task is complete. Use the available tools to list files, read files, write files, replace text in files, inspect git status/diff, and run safe shell commands."'::jsonb,
         'System prompt used by the coding agent.'
     )
-ON CONFLICT (scope, key, repository) DO NOTHING;
+ON CONFLICT (scope, key) WHERE repository IS NULL
+DO UPDATE SET
+    value = EXCLUDED.value,
+    description = EXCLUDED.description,
+    updated_at = NOW();

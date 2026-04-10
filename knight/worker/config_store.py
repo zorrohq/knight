@@ -116,16 +116,27 @@ class ConfigStore:
         repository: str | None = None,
         description: str | None = None,
     ) -> None:
-        query = """
-            INSERT INTO app_config (scope, repository, key, value, description)
-            VALUES (%s, %s, %s, %s::jsonb, %s)
-            ON CONFLICT (scope, key, repository)
-            DO UPDATE SET
-                value = EXCLUDED.value,
-                description = COALESCE(EXCLUDED.description, app_config.description),
-                updated_at = NOW()
-        """
         encoded_value = json.dumps(value, ensure_ascii=True)
+        if repository is None:
+            query = """
+                INSERT INTO app_config (scope, repository, key, value, description)
+                VALUES (%s, %s, %s, %s::jsonb, %s)
+                ON CONFLICT (scope, key) WHERE repository IS NULL
+                DO UPDATE SET
+                    value = EXCLUDED.value,
+                    description = COALESCE(EXCLUDED.description, app_config.description),
+                    updated_at = NOW()
+            """
+        else:
+            query = """
+                INSERT INTO app_config (scope, repository, key, value, description)
+                VALUES (%s, %s, %s, %s::jsonb, %s)
+                ON CONFLICT (scope, repository, key) WHERE repository IS NOT NULL
+                DO UPDATE SET
+                    value = EXCLUDED.value,
+                    description = COALESCE(EXCLUDED.description, app_config.description),
+                    updated_at = NOW()
+            """
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(query, (scope, repository, key, encoded_value, description))
             conn.commit()
