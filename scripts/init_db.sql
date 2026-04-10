@@ -1,3 +1,11 @@
+DO $$
+BEGIN
+    CREATE TYPE app_config_scope AS ENUM ('global', 'repository');
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END
+$$;
+
 CREATE TABLE IF NOT EXISTS agent_branches (
     id BIGSERIAL PRIMARY KEY,
     repository TEXT NOT NULL,
@@ -23,15 +31,13 @@ CREATE INDEX IF NOT EXISTS agent_branches_agent_branch_idx
 
 CREATE TABLE IF NOT EXISTS app_config (
     id BIGSERIAL PRIMARY KEY,
-    scope TEXT NOT NULL DEFAULT 'global',
+    scope app_config_scope NOT NULL DEFAULT 'global',
     repository TEXT,
     key TEXT NOT NULL,
     value JSONB NOT NULL,
     description TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT app_config_scope_check
-        CHECK (scope IN ('global', 'repository', 'provider')),
     CONSTRAINT app_config_scope_repository_check
         CHECK (
             (scope = 'repository' AND repository IS NOT NULL)
