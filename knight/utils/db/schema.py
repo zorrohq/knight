@@ -64,14 +64,14 @@ app_config_table = Table(
         Enum("global", "repository", name="app_config_scope", native_enum=True),
         nullable=False,
     ),
-    Column("repository", String(255), nullable=False, server_default=text("''")),
+    Column("repository", String(255), nullable=True),
     Column("key", String(255), nullable=False),
     Column("value", JSON, nullable=False),
     Column("description", Text, nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     CheckConstraint(
-        "(scope = 'repository' AND repository <> '') OR (scope <> 'repository' AND repository = '')",
+        "(scope = 'repository' AND repository IS NOT NULL) OR (scope <> 'repository' AND repository IS NULL)",
         name="app_config_scope_repository_check",
     ),
     UniqueConstraint(

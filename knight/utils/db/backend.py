@@ -142,14 +142,13 @@ class SqlAlchemyStoreBackend:
         scope: str,
         repository: str | None = None,
     ) -> object | None:
-        repository_key = repository or ""
         statement = (
             select(app_config_table.c.value)
             .where(
                 and_(
                     app_config_table.c.scope == scope,
                     app_config_table.c.key == key,
-                    app_config_table.c.repository == repository_key,
+                    app_config_table.c.repository.is_not_distinct_from(repository),
                 )
             )
             .limit(1)
@@ -168,15 +167,14 @@ class SqlAlchemyStoreBackend:
         description: str | None = None,
     ) -> None:
         now = datetime.now(UTC)
-        repository_key = repository or ""
         config_filter = and_(
             app_config_table.c.scope == scope,
             app_config_table.c.key == key,
-            app_config_table.c.repository == repository_key,
+            app_config_table.c.repository.is_not_distinct_from(repository),
         )
         values = {
             "scope": scope,
-            "repository": repository_key,
+            "repository": repository,
             "key": key,
             "value": value,
             "description": description,
