@@ -2,10 +2,11 @@ from pathlib import Path
 import subprocess
 
 from knight.agents.models import AgentTaskRequest
+from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
 from knight.worker.commit_message import CommitMessageService
 from knight.worker.config import settings
-from knight.worker.state_store import BranchStateStore
+from knight.utils.db.state_store import BranchStateStore
 
 
 class WorkerGitOpsService:
@@ -53,7 +54,7 @@ class WorkerGitOpsService:
                     "git",
                     "push",
                     "--set-upstream",
-                    task.push_remote,
+                    task.push_remote or "origin",
                     sandbox["branch_name"],
                 ],
                 cwd=worktree_path,
@@ -66,7 +67,10 @@ class WorkerGitOpsService:
                 worktree_path=worktree_path,
             )
 
-        repository_identity = task.repository_url or task.repository_local_path
+        repository_identity = normalize_repository_identity(
+            repository_url=task.repository_url,
+            repository_local_path=task.repository_local_path,
+        )
         if repository_identity and task.issue_id:
             self.state_store.mark_branch_status(
                 repository=repository_identity,

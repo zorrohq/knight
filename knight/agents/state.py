@@ -9,6 +9,7 @@ from knight.agents.models import AgentTaskRequest, ToolName, ToolResult
 class AgentState(TypedDict):
     task: AgentTaskRequest
     sandbox: dict[str, Any]
+    runtime_config: dict[str, Any]
     provider_configured: bool
     available_tools: list[ToolName]
     workspace_summary: dict[str, Any]

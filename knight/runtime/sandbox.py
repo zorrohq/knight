@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import shlex
 
-from knight.agents.config import settings
-
 
 class SandboxPolicyError(ValueError):
     """Raised when a command violates sandbox policy."""
@@ -16,9 +14,7 @@ class SandboxPolicy:
         self,
         blocked_command_prefixes: list[str] | None = None,
     ) -> None:
-        self.blocked_command_prefixes = blocked_command_prefixes or list(
-            settings.agent_blocked_command_prefixes
-        )
+        self.blocked_command_prefixes = list(blocked_command_prefixes or [])
 
     def validate_command(self, command: str) -> None:
         parts = shlex.split(command)

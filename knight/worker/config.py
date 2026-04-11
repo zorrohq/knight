@@ -17,7 +17,7 @@ class WorkerSettings(BaseSettings):
     celery_accept_content: list[str] = ["json"]
     celery_timezone: str = "UTC"
     worker_sandbox_root: str = ".knight/sandboxes"
-    worker_state_store_path: str = ".knight/state/agent_branches.json"
+    database_url: str = ""
     worker_default_base_branch: str = "main"
     worker_repo_lock_timeout_seconds: int = 30
     worker_repo_lock_poll_interval_seconds: float = 0.1
