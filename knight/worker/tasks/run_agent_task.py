@@ -50,7 +50,11 @@ def run_agent_task(
     agent = CodingAgentService()
     result = agent.run(prepared_task, sandbox=sandbox, log_config=log_config)
     git_ops = WorkerGitOpsService()
-    post_run = git_ops.finalize_task(task=prepared_task, sandbox=result.sandbox)
+    post_run = git_ops.finalize_task(
+        task=prepared_task,
+        sandbox=result.sandbox,
+        agent_pr_url=result.pr_url,
+    )
     logger.info(
         "worker task completed",
         extra={
@@ -63,6 +67,7 @@ def run_agent_task(
             "post_run_has_changes": post_run["has_changes"],
             "post_run_commit_created": post_run["commit_created"],
             "post_run_push_completed": post_run["push_completed"],
+        "post_run_pr_url": post_run.get("pr_url") or result.pr_url,
         },
     )
 
@@ -77,5 +82,6 @@ def run_agent_task(
         "sandbox": result.sandbox,
         "workspace_summary": result.workspace_summary,
         "steps": [step.model_dump() for step in result.steps],
+        "pr_url": post_run.get("pr_url") or result.pr_url,
         "post_run": post_run,
     }

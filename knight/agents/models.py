@@ -12,6 +12,9 @@ ToolName = Literal[
     "git_status",
     "git_diff",
     "run_command",
+    "http_request",
+    "fetch_url",
+    "commit_and_open_pr",
 ]
 
 
@@ -28,10 +31,13 @@ class AgentTaskRequest(BaseModel):
     workspace_path: str = "."
     task_type: str = "repository_task"
     instructions: str = ""
+    github_token: str = ""
+    author_name: str = ""
+    author_email: str = ""
 
 
 class ToolResult(BaseModel):
-    tool: ToolName
+    tool: str
     success: bool
     output: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
@@ -41,9 +47,10 @@ class AgentRunResult(BaseModel):
     status: str
     provider_configured: bool
     task: AgentTaskRequest
-    available_tools: list[ToolName]
+    available_tools: list[str]
     sandbox: dict[str, Any] = Field(default_factory=dict)
     workspace_summary: dict[str, Any] = Field(default_factory=dict)
     steps: list[ToolResult] = Field(default_factory=list)
     final_message: str = ""
     iterations: int = 0
+    pr_url: str = ""

@@ -13,6 +13,9 @@ class WebhookEventRequest(BaseModel):
     cleanup_worktree: bool = True
     task_type: str = "repository_task"
     instructions: str = ""
+    github_token: str = ""
+    author_name: str = ""
+    author_email: str = ""
 
     @model_validator(mode="after")
     def check_repository_and_instructions(self) -> "WebhookEventRequest":
