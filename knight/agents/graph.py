@@ -4,6 +4,7 @@ import json
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from knight.agents.llm import create_agent_model
 from knight.agents.models import AgentRunResult, AgentTaskRequest, ToolResult
@@ -306,7 +307,7 @@ def finalize(state: AgentState) -> AgentState:
     }
 
 
-def build_agent_graph():
+def build_agent_graph() -> CompiledStateGraph:
     graph = StateGraph(AgentState)
     graph.add_node("inspect_workspace", inspect_workspace)
     graph.add_node("call_model", call_model)

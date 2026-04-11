@@ -1,9 +1,10 @@
 from langchain.chat_models import init_chat_model
+from langchain_core.language_models import BaseChatModel
 
 from knight.agents.runtime_config import ResolvedAgentSettings
 
 
-def create_agent_model(runtime_config: ResolvedAgentSettings):
+def create_agent_model(runtime_config: ResolvedAgentSettings) -> BaseChatModel | None:
     if not runtime_config.provider or not runtime_config.model:
         return None
 

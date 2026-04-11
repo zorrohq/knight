@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import shutil
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 
 from knight.runtime.locking import RepositoryLockManager
-from knight.runtime.repository_identity import repository_key
+from knight.runtime.repository_identity import _slugify, repository_key
 from knight.worker.config import settings
-import re
 
-
-def _slugify(value: str) -> str:
-    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", value.strip())
-    return cleaned.strip("-._") or "default"
+_GIT_TIMEOUT = 120
 
 
 @dataclass(slots=True)
@@ -172,6 +168,7 @@ class WorktreeProvisioner:
                 cwd=repo_path,
                 text=True,
                 capture_output=True,
+                timeout=_GIT_TIMEOUT,
                 check=False,
             )
             if completed.returncode != 0 and worktree_path.exists():
@@ -273,6 +270,7 @@ class WorktreeProvisioner:
             cwd=repo_path,
             text=True,
             capture_output=True,
+            timeout=_GIT_TIMEOUT,
             check=False,
         )
         return f"origin/{branch_name}" if completed.returncode == 0 else None
@@ -301,6 +299,7 @@ class WorktreeProvisioner:
             cwd=repo_path,
             text=True,
             capture_output=True,
+            timeout=_GIT_TIMEOUT,
             check=False,
         )
         if completed.returncode != 0:
@@ -314,6 +313,7 @@ class WorktreeProvisioner:
             cwd=repo_path,
             text=True,
             capture_output=True,
+            timeout=_GIT_TIMEOUT,
             check=False,
         )
         branch = completed.stdout.strip()
@@ -325,6 +325,7 @@ class WorktreeProvisioner:
             cwd=cwd,
             text=True,
             capture_output=True,
+            timeout=_GIT_TIMEOUT,
             check=False,
         )
         if completed.returncode != 0:

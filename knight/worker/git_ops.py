@@ -1,6 +1,8 @@
 from pathlib import Path
 import subprocess
 
+_GIT_TIMEOUT = 120
+
 from knight.agents.models import AgentTaskRequest
 from knight.runtime.logging_config import get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
@@ -140,12 +142,13 @@ class WorkerGitOpsService:
             "diff": diff_text[: settings.worker_commit_max_diff_chars],
         }
 
-    def _run(self, command: list[str], *, cwd: Path):
+    def _run(self, command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
         completed = subprocess.run(
             command,
             cwd=cwd,
             text=True,
             capture_output=True,
+            timeout=_GIT_TIMEOUT,
             check=False,
         )
         if completed.returncode != 0:

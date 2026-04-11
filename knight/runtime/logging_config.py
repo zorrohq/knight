@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import logging
+import sys
 from typing import Any
 
-from knight.worker.config_store import ConfigStore
+from knight.utils.db.config_store import ConfigStore
 
 
 @dataclass(slots=True)
@@ -121,7 +122,11 @@ def setup_logging() -> ResolvedLoggingSettings:
 
     try:
         resolved = LoggingConfigResolver().resolve()
-    except Exception:
+    except Exception as exc:
+        print(
+            f"[knight] logging config unavailable, using defaults: {exc}",
+            file=sys.stderr,
+        )
         resolved = ResolvedLoggingSettings(
             level="INFO",
             format="text",

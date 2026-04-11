@@ -19,6 +19,8 @@ class APISettings(BaseSettings):
     log_level: str = "info"
 
     api_base_prefix: str = "/api"
+    cors_origins: list[str] = []
+    cors_allow_credentials: bool = False
     cors_methods: list[str] = ["*"]
     cors_headers: list[str] = ["*"]
 
