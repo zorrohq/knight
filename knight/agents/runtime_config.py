@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from knight.agents.config import settings
-from knight.worker.config_store import ConfigStore
+from knight.utils.db.config_store import ConfigStore
 
 
 @dataclass(slots=True)

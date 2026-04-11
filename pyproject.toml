@@ -12,4 +12,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "psycopg[binary]>=3.2.9",
+    "sqlalchemy>=2.0.49",
+    "pymysql>=1.1.2",
+    "python-tds>=1.17.1",
 ]
