@@ -4,7 +4,7 @@ from knight.agents.models import AgentTaskRequest
 from knight.runtime.logging_config import get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
-from knight.worker.state_store import BranchRecord, BranchStateStore
+from knight.utils.db.state_store import BranchRecord, BranchStateStore
 
 logger = get_logger(__name__)
 

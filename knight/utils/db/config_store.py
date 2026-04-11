@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import json
-
-import psycopg
-from psycopg.rows import dict_row
-
 from knight.worker.config import settings
+from knight.utils.db.backend import create_store_backend
 
 
 class ConfigStore:
@@ -13,6 +9,7 @@ class ConfigStore:
         self.database_url = database_url or settings.database_url
         if not self.database_url:
             raise ValueError("DATABASE_URL must be configured")
+        self.backend = create_store_backend(self.database_url)
 
     def get_value(
         self,
@@ -21,18 +18,11 @@ class ConfigStore:
         scope: str = "global",
         repository: str | None = None,
     ) -> object | None:
-        query = """
-            SELECT value
-            FROM app_config
-            WHERE scope = %s
-              AND key = %s
-              AND repository IS NOT DISTINCT FROM %s
-            LIMIT 1
-        """
-        with self._connect() as conn, conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(query, (scope, key, repository))
-            row = cur.fetchone()
-        return row["value"] if row else None
+        return self.backend.get_config_value(
+            key=key,
+            scope=scope,
+            repository=repository,
+        )
 
     def get_effective_value(
         self,
@@ -116,30 +106,10 @@ class ConfigStore:
         repository: str | None = None,
         description: str | None = None,
     ) -> None:
-        encoded_value = json.dumps(value, ensure_ascii=True)
-        if repository is None:
-            query = """
-                INSERT INTO app_config (scope, repository, key, value, description)
-                VALUES (%s, %s, %s, %s::jsonb, %s)
-                ON CONFLICT (scope, key) WHERE repository IS NULL
-                DO UPDATE SET
-                    value = EXCLUDED.value,
-                    description = COALESCE(EXCLUDED.description, app_config.description),
-                    updated_at = NOW()
-            """
-        else:
-            query = """
-                INSERT INTO app_config (scope, repository, key, value, description)
-                VALUES (%s, %s, %s, %s::jsonb, %s)
-                ON CONFLICT (scope, repository, key) WHERE repository IS NOT NULL
-                DO UPDATE SET
-                    value = EXCLUDED.value,
-                    description = COALESCE(EXCLUDED.description, app_config.description),
-                    updated_at = NOW()
-            """
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(query, (scope, repository, key, encoded_value, description))
-            conn.commit()
-
-    def _connect(self):
-        return psycopg.connect(self.database_url)
+        self.backend.upsert_config_value(
+            key=key,
+            value=value,
+            scope=scope,
+            repository=repository,
+            description=description,
+        )

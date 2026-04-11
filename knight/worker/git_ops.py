@@ -7,7 +7,7 @@ from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
 from knight.worker.commit_message import CommitMessageService
 from knight.worker.config import settings
-from knight.worker.state_store import BranchStateStore
+from knight.utils.db.state_store import BranchStateStore
 
 logger = get_logger(__name__)
 
