@@ -2,31 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import re
 import shutil
 import subprocess
 
 from knight.runtime.locking import RepositoryLockManager
+from knight.runtime.repository_identity import repository_key
 from knight.worker.config import settings
+import re
 
 
 def _slugify(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", value.strip())
     return cleaned.strip("-._") or "default"
-
-
-def _repository_key(repository_url: str, repository_local_path: str) -> str:
-    if repository_local_path:
-        return _slugify(Path(repository_local_path).resolve().name)
-
-    if repository_url:
-        trimmed = repository_url.rstrip("/").removesuffix(".git")
-        parts = [part for part in trimmed.split("/") if part]
-        if len(parts) >= 2:
-            return _slugify("-".join(parts[-2:]))
-        return _slugify(parts[-1])
-
-    return "default"
 
 
 @dataclass(slots=True)
@@ -61,8 +48,11 @@ class WorktreeProvisioner:
         repository_local_path: str,
         base_branch: str,
     ) -> RepositorySandbox:
-        repository_key = _repository_key(repository_url, repository_local_path)
-        sandbox_root = self.sandbox_root / repository_key
+        resolved_repository_key = repository_key(
+            repository_url=repository_url,
+            repository_local_path=repository_local_path,
+        )
+        sandbox_root = self.sandbox_root / resolved_repository_key
         repo_path = sandbox_root / "repo"
         worktrees_root = sandbox_root / "worktrees"
         sandbox_root.mkdir(parents=True, exist_ok=True)
@@ -78,7 +68,7 @@ class WorktreeProvisioner:
             self.refresh_repository(repo_path=repo_path, base_branch=base_branch)
 
         return RepositorySandbox(
-            repository_key=repository_key,
+            repository_key=resolved_repository_key,
             sandbox_root=sandbox_root,
             repo_path=repo_path,
             worktrees_root=worktrees_root,
@@ -93,13 +83,20 @@ class WorktreeProvisioner:
         base_branch: str,
         branch_name: str = "",
     ) -> WorktreeSandbox:
-        repository_key = _repository_key(repository_url, repository_local_path)
-        lock_path = self.sandbox_root / repository_key / ".repo.lock"
+        resolved_repository_key = repository_key(
+            repository_url=repository_url,
+            repository_local_path=repository_local_path,
+        )
+        lock_path = self.sandbox_root / resolved_repository_key / ".repo.lock"
         with self.lock_manager.acquire(lock_path):
             repository = self.prepare_repository(
                 repository_url=repository_url,
                 repository_local_path=repository_local_path,
                 base_branch=base_branch or settings.worker_default_base_branch,
+            )
+            resolved_base_branch = self._resolve_base_branch(
+                repo_path=repository.repo_path,
+                base_branch=base_branch,
             )
             issue_key = _slugify(issue_id)
             resolved_branch = branch_name or f"knight/{issue_key}"
@@ -107,7 +104,7 @@ class WorktreeProvisioner:
             branch_ref = self.sync_branch_reference(
                 repo_path=repository.repo_path,
                 branch_name=resolved_branch,
-                base_branch=base_branch or settings.worker_default_base_branch,
+                base_branch=resolved_base_branch,
             )
 
             self.prepare_branch_worktree(
@@ -115,22 +112,22 @@ class WorktreeProvisioner:
                 worktree_path=worktree_path,
                 branch_name=resolved_branch,
                 branch_ref=branch_ref,
-                base_branch=base_branch or settings.worker_default_base_branch,
+                base_branch=resolved_base_branch,
             )
 
         return WorktreeSandbox(
             repository_key=repository.repository_key,
             issue_key=issue_key,
             branch_name=resolved_branch,
-            base_branch=base_branch or settings.worker_default_base_branch,
+            base_branch=resolved_base_branch,
             sandbox_root=repository.sandbox_root,
             repo_path=repository.repo_path,
             worktree_path=worktree_path,
         )
 
     def refresh_repository(self, *, repo_path: Path, base_branch: str) -> None:
-        resolved_base = base_branch or settings.worker_default_base_branch
         self._run(["git", "fetch", "--all", "--prune"], cwd=repo_path)
+        resolved_base = self._resolve_base_branch(repo_path=repo_path, base_branch=base_branch)
         reset_target = self._resolve_remote_branch(repo_path, resolved_base)
         self._run(["git", "checkout", "-B", resolved_base, reset_target], cwd=repo_path)
         self._run(["git", "reset", "--hard", reset_target], cwd=repo_path)
@@ -283,6 +280,44 @@ class WorktreeProvisioner:
     def _resolve_remote_branch(self, repo_path: Path, base_branch: str) -> str:
         remote_branch = self._resolve_remote_branch_ref(repo_path, base_branch)
         return remote_branch or base_branch
+
+    def _resolve_base_branch(self, *, repo_path: Path, base_branch: str) -> str:
+        if base_branch:
+            return base_branch
+
+        remote_default = self._resolve_remote_head_branch(repo_path)
+        if remote_default:
+            return remote_default
+
+        current_branch = self._resolve_current_branch(repo_path)
+        if current_branch:
+            return current_branch
+
+        return settings.worker_default_base_branch
+
+    def _resolve_remote_head_branch(self, repo_path: Path) -> str | None:
+        completed = subprocess.run(
+            ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+            cwd=repo_path,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return None
+        ref = completed.stdout.strip()
+        return ref.split("/", 1)[1] if "/" in ref else ref
+
+    def _resolve_current_branch(self, repo_path: Path) -> str | None:
+        completed = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo_path,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        branch = completed.stdout.strip()
+        return branch or None
 
     def _run(self, command: list[str], cwd: Path) -> None:
         completed = subprocess.run(

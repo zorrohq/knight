@@ -3,9 +3,13 @@ from typing import Any
 
 from knight.agents.models import AgentTaskRequest
 from knight.agents.service import CodingAgentService
+from knight.runtime.logging_config import get_logger, setup_logging
+from knight.runtime.repository_identity import normalize_repository_identity
 from knight.worker.celery_app import celery_app
 from knight.worker.git_ops import WorkerGitOpsService
 from knight.worker.runtime import WorkerRuntimeService
+
+logger = get_logger(__name__)
 
 
 @celery_app.task(
@@ -15,13 +19,52 @@ from knight.worker.runtime import WorkerRuntimeService
 def run_agent_task(
     self, payload: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
+    log_config = setup_logging()
     task = AgentTaskRequest.model_validate(payload or {})
+    repository_identity = normalize_repository_identity(
+        repository_url=task.repository_url,
+        repository_local_path=task.repository_local_path,
+    )
+    logger.info(
+        "worker task started",
+        extra={
+            "task_id": self.request.id,
+            "repository": repository_identity,
+            "issue_id": task.issue_id,
+            "task_type": task.task_type,
+        },
+    )
     runtime = WorkerRuntimeService()
     prepared_task, sandbox = runtime.prepare_task(task)
+    logger.info(
+        "workspace prepared",
+        extra={
+            "task_id": self.request.id,
+            "repository": repository_identity,
+            "issue_id": prepared_task.issue_id,
+            "branch_name": prepared_task.branch_name,
+            "base_branch": prepared_task.base_branch,
+            "workspace_path": prepared_task.workspace_path,
+        },
+    )
     agent = CodingAgentService()
-    result = agent.run(prepared_task, sandbox=sandbox)
+    result = agent.run(prepared_task, sandbox=sandbox, log_config=log_config)
     git_ops = WorkerGitOpsService()
     post_run = git_ops.finalize_task(task=prepared_task, sandbox=result.sandbox)
+    logger.info(
+        "worker task completed",
+        extra={
+            "task_id": self.request.id,
+            "repository": repository_identity,
+            "issue_id": prepared_task.issue_id,
+            "branch_name": prepared_task.branch_name,
+            "status": result.status,
+            "iterations": result.iterations,
+            "post_run_has_changes": post_run["has_changes"],
+            "post_run_commit_created": post_run["commit_created"],
+            "post_run_push_completed": post_run["push_completed"],
+        },
+    )
 
     return {
         "task_id": self.request.id,

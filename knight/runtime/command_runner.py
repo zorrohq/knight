@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 import subprocess
 
-from knight.agents.config import settings
 from knight.runtime.sandbox import SandboxPolicy
 
 
@@ -18,8 +17,14 @@ class CommandResult:
 
 
 class LocalCommandRunner:
-    def __init__(self, policy: SandboxPolicy | None = None) -> None:
+    def __init__(
+        self,
+        policy: SandboxPolicy | None = None,
+        *,
+        max_output_chars: int = 12000,
+    ) -> None:
         self.policy = policy or SandboxPolicy()
+        self.max_output_chars = max_output_chars
 
     def run(
         self,
@@ -42,6 +47,6 @@ class LocalCommandRunner:
             command=command,
             cwd=str(Path(cwd)),
             exit_code=completed.returncode,
-            stdout=completed.stdout[: settings.agent_max_command_output_chars],
-            stderr=completed.stderr[: settings.agent_max_command_output_chars],
+            stdout=completed.stdout[: self.max_output_chars],
+            stderr=completed.stderr[: self.max_output_chars],
         )

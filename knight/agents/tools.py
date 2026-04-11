@@ -3,7 +3,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from knight.agents.config import settings
+from knight.agents.runtime_config import ResolvedAgentSettings
 from knight.runtime.command_runner import LocalCommandRunner
 from knight.runtime.filesystem import LocalWorkspace
 
@@ -47,7 +47,7 @@ class GitDiffInput(BaseModel):
 class RunCommandInput(BaseModel):
     command: str
     cwd: str = "."
-    timeout_seconds: int = Field(default=settings.agent_command_timeout_seconds)
+    timeout_seconds: int = Field(default=300)
 
 
 class AgentToolset:
@@ -55,9 +55,11 @@ class AgentToolset:
         self,
         workspace: LocalWorkspace,
         command_runner: LocalCommandRunner,
+        runtime_config: ResolvedAgentSettings,
     ) -> None:
         self.workspace = workspace
         self.command_runner = command_runner
+        self.runtime_config = runtime_config
 
     def list_files(self, path: str = ".", recursive: bool = True) -> dict[str, Any]:
         return {"files": self.workspace.list_files(path=path, recursive=recursive)}
@@ -102,7 +104,7 @@ class AgentToolset:
         result = self.command_runner.run(
             command="git status --short",
             cwd=self.workspace.resolve_path(path),
-            timeout_seconds=settings.agent_command_timeout_seconds,
+            timeout_seconds=self.runtime_config.command_timeout_seconds,
         )
         return {
             "exit_code": result.exit_code,
@@ -114,7 +116,7 @@ class AgentToolset:
         result = self.command_runner.run(
             command="git diff -- .",
             cwd=self.workspace.resolve_path(path),
-            timeout_seconds=settings.agent_command_timeout_seconds,
+            timeout_seconds=self.runtime_config.command_timeout_seconds,
         )
         return {
             "exit_code": result.exit_code,
@@ -126,12 +128,12 @@ class AgentToolset:
         self,
         command: str,
         cwd: str = ".",
-        timeout_seconds: int = settings.agent_command_timeout_seconds,
+        timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         result = self.command_runner.run(
             command=command,
             cwd=self.workspace.resolve_path(cwd),
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=timeout_seconds or self.runtime_config.command_timeout_seconds,
         )
         return {
             "exit_code": result.exit_code,
@@ -140,7 +142,7 @@ class AgentToolset:
         }
 
     def build_tools(self) -> list[StructuredTool]:
-        return [
+        tools = [
             StructuredTool.from_function(
                 func=self.list_files,
                 name="list_files",
@@ -152,18 +154,6 @@ class AgentToolset:
                 name="read_file",
                 description="Read a file from the workspace.",
                 args_schema=ReadFileInput,
-            ),
-            StructuredTool.from_function(
-                func=self.write_file,
-                name="write_file",
-                description="Write a file in the workspace.",
-                args_schema=WriteFileInput,
-            ),
-            StructuredTool.from_function(
-                func=self.replace_in_file,
-                name="replace_in_file",
-                description="Replace text inside a workspace file.",
-                args_schema=ReplaceInFileInput,
             ),
             StructuredTool.from_function(
                 func=self.search_files,
@@ -183,13 +173,34 @@ class AgentToolset:
                 description="Inspect the current git diff inside the workspace repository.",
                 args_schema=GitDiffInput,
             ),
-            StructuredTool.from_function(
-                func=self.run_command,
-                name="run_command",
-                description="Run a shell command inside the workspace, subject to sandbox policy.",
-                args_schema=RunCommandInput,
-            ),
         ]
+        if self.runtime_config.allow_write_files:
+            tools.extend(
+                [
+                    StructuredTool.from_function(
+                        func=self.write_file,
+                        name="write_file",
+                        description="Write a file in the workspace.",
+                        args_schema=WriteFileInput,
+                    ),
+                    StructuredTool.from_function(
+                        func=self.replace_in_file,
+                        name="replace_in_file",
+                        description="Replace text inside a workspace file.",
+                        args_schema=ReplaceInFileInput,
+                    ),
+                ]
+            )
+        if self.runtime_config.allow_run_command:
+            tools.append(
+                StructuredTool.from_function(
+                    func=self.run_command,
+                    name="run_command",
+                    description="Run a shell command inside the workspace, subject to sandbox policy.",
+                    args_schema=RunCommandInput,
+                )
+            )
+        return tools
 
     def build_tool_map(self) -> dict[str, StructuredTool]:
         return {tool.name: tool for tool in self.build_tools()}

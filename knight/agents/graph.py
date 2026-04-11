@@ -5,23 +5,49 @@ import json
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
-from knight.agents.config import settings
 from knight.agents.llm import create_agent_model
 from knight.agents.models import AgentRunResult, AgentTaskRequest, ToolResult
+from knight.agents.runtime_config import AgentConfigResolver, ResolvedAgentSettings
 from knight.agents.state import AgentState
 from knight.agents.tools import AgentToolset
 from knight.runtime.command_runner import LocalCommandRunner
 from knight.runtime.filesystem import LocalWorkspace
+from knight.runtime.logging_config import (
+    ResolvedLoggingSettings as RuntimeLogSettings,
+    get_logger,
+)
+from knight.runtime.repository_identity import normalize_repository_identity
+from knight.runtime.sandbox import SandboxPolicy
+
+logger = get_logger(__name__)
 
 
 def build_initial_state(
     task: AgentTaskRequest,
     sandbox: dict[str, object] | None = None,
+    log_config: RuntimeLogSettings | None = None,
 ) -> AgentState:
-    provider_configured = bool(settings.agent_provider and settings.agent_model)
+    repository_identity = normalize_repository_identity(
+        repository_url=task.repository_url,
+        repository_local_path=task.repository_local_path,
+    ) or None
+    runtime_config = AgentConfigResolver().resolve(repository=repository_identity)
+    provider_configured = bool(runtime_config.provider and runtime_config.model)
     return {
         "task": task,
         "sandbox": dict(sandbox or {}),
+        "runtime_config": {
+            "provider": runtime_config.provider,
+            "model": runtime_config.model,
+            "temperature": runtime_config.temperature,
+            "max_steps": runtime_config.max_steps,
+            "command_timeout_seconds": runtime_config.command_timeout_seconds,
+            "max_command_output_chars": runtime_config.max_command_output_chars,
+            "blocked_command_prefixes": list(runtime_config.blocked_command_prefixes),
+            "allow_run_command": runtime_config.allow_run_command,
+            "allow_write_files": runtime_config.allow_write_files,
+            "system_prompt": runtime_config.system_prompt,
+        },
         "provider_configured": provider_configured,
         "available_tools": [],
         "workspace_summary": {},
@@ -36,17 +62,20 @@ def build_initial_state(
 def build_system_message(state: AgentState) -> SystemMessage:
     task = state["task"]
     summary = state["workspace_summary"]
+    runtime_config = ResolvedAgentSettings(**state["runtime_config"])
     top_level_files = ", ".join(summary.get("top_level_files", []))
     content = (
-        f"{settings.agent_system_prompt}\n\n"
+        f"{runtime_config.system_prompt}\n\n"
         f"Task type: {task.task_type}\n"
         f"Repository URL: {task.repository_url or 'not provided'}\n"
         f"Workspace root: {summary.get('root', task.workspace_path)}\n"
         f"Sandbox root: {state['sandbox'].get('sandbox_root', 'not prepared')}\n"
         f"Worktree branch: {state['sandbox'].get('branch_name', 'not prepared')}\n"
         f"Top-level files: {top_level_files or 'none'}\n"
-        f"Maximum tool iterations: {settings.agent_max_steps}\n"
-        f"Blocked command prefixes: {', '.join(settings.agent_blocked_command_prefixes)}\n"
+        f"Maximum tool iterations: {runtime_config.max_steps}\n"
+        f"Run command enabled: {runtime_config.allow_run_command}\n"
+        f"Write file tools enabled: {runtime_config.allow_write_files}\n"
+        f"Blocked command prefixes: {', '.join(runtime_config.blocked_command_prefixes)}\n"
         "When you have completed the task, respond with a concise summary and do not "
         "emit any more tool calls."
     )
@@ -54,11 +83,19 @@ def build_system_message(state: AgentState) -> SystemMessage:
 
 
 def get_toolset(state: AgentState) -> AgentToolset:
-    workspace_path = state["task"].workspace_path or settings.agent_workspace_root
+    workspace_path = state["task"].workspace_path or "."
+    runtime_config = ResolvedAgentSettings(**state["runtime_config"])
     return AgentToolset(
         workspace=LocalWorkspace(workspace_path),
-        command_runner=LocalCommandRunner(),
+        command_runner=LocalCommandRunner(
+            policy=SandboxPolicy(
+                blocked_command_prefixes=runtime_config.blocked_command_prefixes,
+            ),
+            max_output_chars=runtime_config.max_command_output_chars,
+        ),
+        runtime_config=runtime_config,
     )
+
 
 def inspect_workspace(state: AgentState) -> AgentState:
     toolset = get_toolset(state)
@@ -72,6 +109,19 @@ def inspect_workspace(state: AgentState) -> AgentState:
     )
 
     status = "ready" if state["provider_configured"] else "awaiting_provider"
+    logger.info(
+        "agent workspace inspected",
+        extra={
+            "repository": normalize_repository_identity(
+                repository_url=state["task"].repository_url,
+                repository_local_path=state["task"].repository_local_path,
+            ),
+            "issue_id": state["task"].issue_id,
+            "branch_name": state["sandbox"].get("branch_name"),
+            "provider_configured": state["provider_configured"],
+            "available_tools": [tool.name for tool in tools],
+        },
+    )
 
     return {
         **state,
@@ -91,7 +141,8 @@ def inspect_workspace(state: AgentState) -> AgentState:
 
 
 def call_model(state: AgentState) -> AgentState:
-    model = create_agent_model()
+    runtime_config = ResolvedAgentSettings(**state["runtime_config"])
+    model = create_agent_model(runtime_config)
     if model is None:
         return {
             **state,
@@ -101,6 +152,19 @@ def call_model(state: AgentState) -> AgentState:
     toolset = get_toolset(state)
     bound_model = model.bind_tools(toolset.build_tools())
     response = bound_model.invoke([build_system_message(state), *state["messages"]])
+    logger.info(
+        "agent model invoked",
+        extra={
+            "repository": normalize_repository_identity(
+                repository_url=state["task"].repository_url,
+                repository_local_path=state["task"].repository_local_path,
+            ),
+            "issue_id": state["task"].issue_id,
+            "branch_name": state["sandbox"].get("branch_name"),
+            "iteration": state["iterations"] + 1,
+            "tool_call_count": len(response.tool_calls),
+        },
+    )
 
     return {
         **state,
@@ -115,6 +179,7 @@ def execute_tools(state: AgentState) -> AgentState:
     last_message = state["messages"][-1]
     if not isinstance(last_message, AIMessage):
         return state
+    log_config = RuntimeLogSettings(**state["runtime_config"])
 
     tool_messages: list[ToolMessage] = []
     step_results = list(state["steps"])
@@ -172,6 +237,23 @@ def execute_tools(state: AgentState) -> AgentState:
             )
 
         step_results.append(step_result)
+        if log_config.log_tool_results:
+            extra = {
+                "repository": normalize_repository_identity(
+                    repository_url=state["task"].repository_url,
+                    repository_local_path=state["task"].repository_local_path,
+                ),
+                "issue_id": state["task"].issue_id,
+                "branch_name": state["sandbox"].get("branch_name"),
+                "tool": tool_name,
+                "success": step_result.success,
+            }
+            if tool_name == "run_command":
+                extra["exit_code"] = step_result.output.get("exit_code")
+                if log_config.log_command_output:
+                    extra["stdout"] = step_result.output.get("stdout", "")
+                    extra["stderr"] = step_result.output.get("stderr", "")
+            logger.info("agent tool executed", extra=extra)
 
     return {
         **state,
@@ -182,10 +264,11 @@ def execute_tools(state: AgentState) -> AgentState:
 
 
 def should_continue(state: AgentState) -> str:
+    runtime_config = ResolvedAgentSettings(**state["runtime_config"])
     if not state["provider_configured"]:
         return "finalize"
 
-    if state["iterations"] >= settings.agent_max_steps:
+    if state["iterations"] >= runtime_config.max_steps:
         return "finalize"
 
     last_message = state["messages"][-1]
@@ -196,6 +279,7 @@ def should_continue(state: AgentState) -> str:
 
 
 def finalize(state: AgentState) -> AgentState:
+    runtime_config = ResolvedAgentSettings(**state["runtime_config"])
     final_message = state["final_message"]
     if state["messages"] and isinstance(state["messages"][-1], AIMessage):
         content = state["messages"][-1].content
@@ -203,7 +287,7 @@ def finalize(state: AgentState) -> AgentState:
             final_message = content
 
     if not final_message:
-        if state["iterations"] >= settings.agent_max_steps:
+        if state["iterations"] >= runtime_config.max_steps:
             final_message = "Agent stopped after reaching the maximum tool iterations."
             status = "max_iterations_reached"
         elif not state["provider_configured"]:
@@ -258,8 +342,24 @@ class AgentGraphRunner:
         self,
         task: AgentTaskRequest,
         sandbox: dict[str, object] | None = None,
+        log_config: RuntimeLogSettings | None = None,
     ) -> AgentRunResult:
-        final_state = self.graph.invoke(build_initial_state(task, sandbox=sandbox))
+        final_state = self.graph.invoke(
+            build_initial_state(task, sandbox=sandbox, log_config=log_config)
+        )
+        logger.info(
+            "agent run completed",
+            extra={
+                "repository": normalize_repository_identity(
+                    repository_url=task.repository_url,
+                    repository_local_path=task.repository_local_path,
+                ),
+                "issue_id": task.issue_id,
+                "branch_name": final_state["sandbox"].get("branch_name"),
+                "status": final_state["status"],
+                "iterations": final_state["iterations"],
+            },
+        )
         return AgentRunResult(
             status=final_state["status"],
             provider_configured=final_state["provider_configured"],
