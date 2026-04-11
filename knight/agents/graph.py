@@ -12,13 +12,20 @@ from knight.agents.state import AgentState
 from knight.agents.tools import AgentToolset
 from knight.runtime.command_runner import LocalCommandRunner
 from knight.runtime.filesystem import LocalWorkspace
+from knight.runtime.logging_config import (
+    ResolvedLoggingSettings as RuntimeLogSettings,
+    get_logger,
+)
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.sandbox import SandboxPolicy
+
+logger = get_logger(__name__)
 
 
 def build_initial_state(
     task: AgentTaskRequest,
     sandbox: dict[str, object] | None = None,
+    log_config: RuntimeLogSettings | None = None,
 ) -> AgentState:
     repository_identity = normalize_repository_identity(
         repository_url=task.repository_url,
@@ -102,6 +109,19 @@ def inspect_workspace(state: AgentState) -> AgentState:
     )
 
     status = "ready" if state["provider_configured"] else "awaiting_provider"
+    logger.info(
+        "agent workspace inspected",
+        extra={
+            "repository": normalize_repository_identity(
+                repository_url=state["task"].repository_url,
+                repository_local_path=state["task"].repository_local_path,
+            ),
+            "issue_id": state["task"].issue_id,
+            "branch_name": state["sandbox"].get("branch_name"),
+            "provider_configured": state["provider_configured"],
+            "available_tools": [tool.name for tool in tools],
+        },
+    )
 
     return {
         **state,
@@ -132,6 +152,19 @@ def call_model(state: AgentState) -> AgentState:
     toolset = get_toolset(state)
     bound_model = model.bind_tools(toolset.build_tools())
     response = bound_model.invoke([build_system_message(state), *state["messages"]])
+    logger.info(
+        "agent model invoked",
+        extra={
+            "repository": normalize_repository_identity(
+                repository_url=state["task"].repository_url,
+                repository_local_path=state["task"].repository_local_path,
+            ),
+            "issue_id": state["task"].issue_id,
+            "branch_name": state["sandbox"].get("branch_name"),
+            "iteration": state["iterations"] + 1,
+            "tool_call_count": len(response.tool_calls),
+        },
+    )
 
     return {
         **state,
@@ -146,6 +179,7 @@ def execute_tools(state: AgentState) -> AgentState:
     last_message = state["messages"][-1]
     if not isinstance(last_message, AIMessage):
         return state
+    log_config = RuntimeLogSettings(**state["runtime_config"])
 
     tool_messages: list[ToolMessage] = []
     step_results = list(state["steps"])
@@ -203,6 +237,23 @@ def execute_tools(state: AgentState) -> AgentState:
             )
 
         step_results.append(step_result)
+        if log_config.log_tool_results:
+            extra = {
+                "repository": normalize_repository_identity(
+                    repository_url=state["task"].repository_url,
+                    repository_local_path=state["task"].repository_local_path,
+                ),
+                "issue_id": state["task"].issue_id,
+                "branch_name": state["sandbox"].get("branch_name"),
+                "tool": tool_name,
+                "success": step_result.success,
+            }
+            if tool_name == "run_command":
+                extra["exit_code"] = step_result.output.get("exit_code")
+                if log_config.log_command_output:
+                    extra["stdout"] = step_result.output.get("stdout", "")
+                    extra["stderr"] = step_result.output.get("stderr", "")
+            logger.info("agent tool executed", extra=extra)
 
     return {
         **state,
@@ -291,8 +342,24 @@ class AgentGraphRunner:
         self,
         task: AgentTaskRequest,
         sandbox: dict[str, object] | None = None,
+        log_config: RuntimeLogSettings | None = None,
     ) -> AgentRunResult:
-        final_state = self.graph.invoke(build_initial_state(task, sandbox=sandbox))
+        final_state = self.graph.invoke(
+            build_initial_state(task, sandbox=sandbox, log_config=log_config)
+        )
+        logger.info(
+            "agent run completed",
+            extra={
+                "repository": normalize_repository_identity(
+                    repository_url=task.repository_url,
+                    repository_local_path=task.repository_local_path,
+                ),
+                "issue_id": task.issue_id,
+                "branch_name": final_state["sandbox"].get("branch_name"),
+                "status": final_state["status"],
+                "iterations": final_state["iterations"],
+            },
+        )
         return AgentRunResult(
             status=final_state["status"],
             provider_configured=final_state["provider_configured"],

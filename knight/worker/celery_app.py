@@ -1,9 +1,11 @@
 from celery import Celery
 
+from knight.runtime.logging_config import setup_logging
 from knight.worker.config import settings
 
 
 def create_celery_app() -> Celery:
+    setup_logging()
     app = Celery(
         settings.celery_app_name,
         broker=settings.celery_broker_url,

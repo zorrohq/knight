@@ -1,9 +1,12 @@
 from typing import Any
 
 from knight.agents.models import AgentTaskRequest
+from knight.runtime.logging_config import get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
 from knight.utils.db.state_store import BranchRecord, BranchStateStore
+
+logger = get_logger(__name__)
 
 
 class WorkerRuntimeService:
@@ -28,6 +31,16 @@ class WorkerRuntimeService:
 
         resolved_branch_name = task.branch_name or (
             existing_record.agent_branch if existing_record else ""
+        )
+        logger.info(
+            "preparing worker sandbox",
+            extra={
+                "repository": repository_identity,
+                "issue_id": task.issue_id,
+                "requested_branch_name": task.branch_name,
+                "resolved_branch_name": resolved_branch_name,
+                "existing_branch_record": bool(existing_record),
+            },
         )
         sandbox = self.provisioner.prepare_worktree(
             repository_url=task.repository_url,
@@ -61,4 +74,15 @@ class WorkerRuntimeService:
             "repo_path": str(sandbox.repo_path),
             "worktree_path": str(sandbox.worktree_path),
         }
+        logger.info(
+            "worker sandbox prepared",
+            extra={
+                "repository": repository_identity,
+                "issue_id": task.issue_id,
+                "branch_name": sandbox.branch_name,
+                "base_branch": sandbox.base_branch,
+                "repo_path": str(sandbox.repo_path),
+                "worktree_path": str(sandbox.worktree_path),
+            },
+        )
         return prepared_task, sandbox_metadata
