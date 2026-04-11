@@ -18,6 +18,7 @@ from knight.runtime.filesystem import LocalWorkspace
 from knight.runtime.logging_config import (
     ResolvedLoggingSettings as RuntimeLogSettings,
     get_logger,
+    setup_logging,
 )
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.sandbox import SandboxPolicy
@@ -206,7 +207,7 @@ def execute_tools(state: AgentState) -> AgentState:
     last_message = state["messages"][-1]
     if not isinstance(last_message, AIMessage):
         return state
-    log_config = RuntimeLogSettings(**state["runtime_config"])
+    log_config = setup_logging()
 
     tool_messages: list[ToolMessage] = []
     step_results = list(state["steps"])

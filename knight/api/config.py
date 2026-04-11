@@ -24,5 +24,11 @@ class APISettings(BaseSettings):
     cors_methods: list[str] = ["*"]
     cors_headers: list[str] = ["*"]
 
+    github_webhook_secret: str = ""
+    github_token: str = ""
+    # Trigger keyword that must appear in a comment body to invoke Knight.
+    # Set to empty string to trigger on every relevant event.
+    github_trigger_keyword: str = "@knight"
+
 
 settings = APISettings()
