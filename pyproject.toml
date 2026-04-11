@@ -18,4 +18,5 @@ dependencies = [
     "requests>=2.33.1",
     "markdownify>=1.2.2",
     "httpx>=0.28.1",
+    "pyjwt[crypto]>=2.12.1",
 ]
