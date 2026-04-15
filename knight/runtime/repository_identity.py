@@ -67,6 +67,7 @@ def _get_origin_remote_url(source_path: Path) -> str:
         cwd=source_path,
         text=True,
         capture_output=True,
+        timeout=30,
         check=False,
     )
     if completed.returncode != 0:

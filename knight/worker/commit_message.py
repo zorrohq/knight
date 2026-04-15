@@ -1,5 +1,7 @@
 from knight.agents.llm import create_agent_model
 from knight.agents.models import AgentTaskRequest
+from knight.agents.runtime_config import AgentConfigResolver
+from knight.runtime.repository_identity import normalize_repository_identity
 from knight.worker.config import settings
 
 
@@ -10,7 +12,12 @@ class CommitMessageService:
         task: AgentTaskRequest,
         diff_text: str,
     ) -> str:
-        model = create_agent_model()
+        repository_identity = normalize_repository_identity(
+            repository_url=task.repository_url,
+            repository_local_path=task.repository_local_path,
+        ) or None
+        runtime_config = AgentConfigResolver().resolve(repository=repository_identity)
+        model = create_agent_model(runtime_config)
         trimmed_diff = diff_text[: settings.worker_commit_max_diff_chars]
 
         if model is None:

@@ -48,6 +48,7 @@ class WorkerRuntimeService:
             issue_id=task.issue_id or "default",
             base_branch=task.base_branch,
             branch_name=resolved_branch_name,
+            github_token=task.github_token,
         )
         prepared_task = task.model_copy(
             update={

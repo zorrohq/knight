@@ -72,6 +72,7 @@ class LocalWorkspace:
             check=False,
             capture_output=True,
             text=True,
+            timeout=30,
             cwd=search_root,
         )
         if completed.returncode not in {0, 1}:

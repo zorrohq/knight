@@ -17,6 +17,7 @@ class ResolvedAgentSettings:
     blocked_command_prefixes: list[str]
     allow_run_command: bool
     allow_write_files: bool
+    allow_commit_and_push: bool
     system_prompt: str
 
 
@@ -68,6 +69,11 @@ class AgentConfigResolver:
             ),
             allow_write_files=self.store.get_bool(
                 key="agent_allow_write_files",
+                repository=repository,
+                default=True,
+            ),
+            allow_commit_and_push=self.store.get_bool(
+                key="agent_allow_commit_and_push",
                 repository=repository,
                 default=True,
             ),

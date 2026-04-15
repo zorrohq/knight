@@ -19,8 +19,20 @@ class APISettings(BaseSettings):
     log_level: str = "info"
 
     api_base_prefix: str = "/api"
+    cors_origins: list[str] = []
+    cors_allow_credentials: bool = False
     cors_methods: list[str] = ["*"]
     cors_headers: list[str] = ["*"]
+
+    github_webhook_secret: str = ""
+    github_token: str = ""
+    # GitHub App credentials (preferred over PAT for private repo access).
+    # Set both to enable App-based auth; falls back to github_token if unset.
+    github_app_id: str = ""
+    github_app_private_key: str = ""
+    # Trigger keyword that must appear in a comment body to invoke Knight.
+    # Set to empty string to trigger on every relevant event.
+    github_trigger_keyword: str = "@knight"
 
 
 settings = APISettings()

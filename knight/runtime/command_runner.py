@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
+import shlex
 import subprocess
 
 from knight.runtime.sandbox import SandboxPolicy
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -34,14 +38,27 @@ class LocalCommandRunner:
         timeout_seconds: int = 300,
     ) -> CommandResult:
         self.policy.validate_command(command)
+        argv = shlex.split(command)
+        logger.debug(
+            "running command",
+            extra={
+                "command": command,
+                "cwd": str(cwd),
+                "timeout_seconds": timeout_seconds,
+            },
+        )
         completed = subprocess.run(
-            command,
-            shell=True,
+            argv,
+            shell=False,
             cwd=Path(cwd),
             text=True,
             capture_output=True,
             timeout=timeout_seconds,
             check=False,
+        )
+        logger.debug(
+            "command finished",
+            extra={"command": command, "exit_code": completed.returncode},
         )
         return CommandResult(
             command=command,

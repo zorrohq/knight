@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class WebhookEventRequest(BaseModel):
@@ -13,6 +13,19 @@ class WebhookEventRequest(BaseModel):
     cleanup_worktree: bool = True
     task_type: str = "repository_task"
     instructions: str = ""
+    github_token: str = ""
+    author_name: str = ""
+    author_email: str = ""
+
+    @model_validator(mode="after")
+    def check_repository_and_instructions(self) -> "WebhookEventRequest":
+        if not self.repository_url and not self.repository_local_path:
+            raise ValueError(
+                "at least one of repository_url or repository_local_path must be provided"
+            )
+        if not self.instructions.strip():
+            raise ValueError("instructions must not be empty")
+        return self
 
 
 class WebhookEventResponse(BaseModel):

@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import shutil
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 from knight.runtime.locking import RepositoryLockManager
-from knight.runtime.repository_identity import repository_key
+from knight.runtime.repository_identity import _slugify, repository_key
 from knight.worker.config import settings
-import re
 
-
-def _slugify(value: str) -> str:
-    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", value.strip())
-    return cleaned.strip("-._") or "default"
+_GIT_TIMEOUT = 120
 
 
 @dataclass(slots=True)
@@ -47,6 +44,7 @@ class WorktreeProvisioner:
         repository_url: str,
         repository_local_path: str,
         base_branch: str,
+        github_token: str = "",
     ) -> RepositorySandbox:
         resolved_repository_key = repository_key(
             repository_url=repository_url,
@@ -63,6 +61,7 @@ class WorktreeProvisioner:
                 repository_url=repository_url,
                 repository_local_path=repository_local_path,
                 destination=repo_path,
+                github_token=github_token,
             )
         else:
             self.refresh_repository(repo_path=repo_path, base_branch=base_branch)
@@ -82,6 +81,7 @@ class WorktreeProvisioner:
         issue_id: str,
         base_branch: str,
         branch_name: str = "",
+        github_token: str = "",
     ) -> WorktreeSandbox:
         resolved_repository_key = repository_key(
             repository_url=repository_url,
@@ -93,6 +93,7 @@ class WorktreeProvisioner:
                 repository_url=repository_url,
                 repository_local_path=repository_local_path,
                 base_branch=base_branch or settings.worker_default_base_branch,
+                github_token=github_token,
             )
             resolved_base_branch = self._resolve_base_branch(
                 repo_path=repository.repo_path,
@@ -172,10 +173,26 @@ class WorktreeProvisioner:
                 cwd=repo_path,
                 text=True,
                 capture_output=True,
+                timeout=_GIT_TIMEOUT,
                 check=False,
             )
             if completed.returncode != 0 and worktree_path.exists():
                 shutil.rmtree(worktree_path, ignore_errors=True)
+
+    @staticmethod
+    def _inject_token_into_url(url: str, token: str) -> str:
+        """Return the URL with token embedded as the userinfo component.
+
+        Converts ``https://github.com/owner/repo.git`` into
+        ``https://x-access-token:<token>@github.com/owner/repo.git``.
+        Only applied to https/http URLs; SSH URLs are returned unchanged.
+        """
+        parsed = urlparse(url)
+        if parsed.scheme not in {"https", "http"}:
+            return url
+        authed = parsed._replace(netloc=f"x-access-token:{token}@{parsed.hostname}"
+                                         + (f":{parsed.port}" if parsed.port else ""))
+        return urlunparse(authed)
 
     def _clone_repository(
         self,
@@ -183,6 +200,7 @@ class WorktreeProvisioner:
         repository_url: str,
         repository_local_path: str,
         destination: Path,
+        github_token: str = "",
     ) -> None:
         if repository_local_path:
             source_path = Path(repository_local_path).resolve()
@@ -192,7 +210,12 @@ class WorktreeProvisioner:
                 )
             command = ["git", "clone", "--no-hardlinks", str(source_path), str(destination)]
         elif repository_url:
-            command = ["git", "clone", repository_url, str(destination)]
+            clone_url = (
+                self._inject_token_into_url(repository_url, github_token)
+                if github_token
+                else repository_url
+            )
+            command = ["git", "clone", clone_url, str(destination)]
         else:
             raise ValueError("either repository_url or repository_local_path must be set")
 
@@ -273,6 +296,7 @@ class WorktreeProvisioner:
             cwd=repo_path,
             text=True,
             capture_output=True,
+            timeout=_GIT_TIMEOUT,
             check=False,
         )
         return f"origin/{branch_name}" if completed.returncode == 0 else None
@@ -301,6 +325,7 @@ class WorktreeProvisioner:
             cwd=repo_path,
             text=True,
             capture_output=True,
+            timeout=_GIT_TIMEOUT,
             check=False,
         )
         if completed.returncode != 0:
@@ -314,6 +339,7 @@ class WorktreeProvisioner:
             cwd=repo_path,
             text=True,
             capture_output=True,
+            timeout=_GIT_TIMEOUT,
             check=False,
         )
         branch = completed.stdout.strip()
@@ -325,6 +351,7 @@ class WorktreeProvisioner:
             cwd=cwd,
             text=True,
             capture_output=True,
+            timeout=_GIT_TIMEOUT,
             check=False,
         )
         if completed.returncode != 0:

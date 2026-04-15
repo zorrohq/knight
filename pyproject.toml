@@ -15,4 +15,8 @@ dependencies = [
     "sqlalchemy>=2.0.49",
     "pymysql>=1.1.2",
     "python-tds>=1.17.1",
+    "requests>=2.33.1",
+    "markdownify>=1.2.2",
+    "httpx>=0.28.1",
+    "pyjwt[crypto]>=2.12.1",
 ]
