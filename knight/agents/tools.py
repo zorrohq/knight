@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import logging
 import shlex
@@ -422,13 +421,15 @@ class AgentToolset:
         status = self._git(["git", "status", "--porcelain"], cwd=worktree_path)
         has_uncommitted = bool(status.stdout.strip())
 
-        # Check for unpushed commits
+        # Check for unpushed commits. When the branch doesn't exist on the remote
+        # yet, the range ref fails (exit_code != 0) — treat that as "has unpushed"
+        # because the branch itself needs to be pushed for the first time.
         unpushed = self._git(
             ["git", "log", "--oneline", f"origin/{branch_name}..HEAD"],
             cwd=worktree_path,
             check=False,
         )
-        has_unpushed = bool(unpushed.stdout.strip())
+        has_unpushed = bool(unpushed.stdout.strip()) or unpushed.returncode != 0
 
         if not has_uncommitted and not has_unpushed:
             return {"success": False, "error": "no changes detected", "pr_url": None}
@@ -502,23 +503,19 @@ class AgentToolset:
         repo_owner, repo_name = repository.split("/", 1)
 
         try:
-            base_branch = asyncio.run(
-                get_github_default_branch(
-                    repo_owner=repo_owner,
-                    repo_name=repo_name,
-                    github_token=github_token,
-                )
+            base_branch = get_github_default_branch(
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                github_token=github_token,
             )
-            pr_url, _pr_number, pr_existing = asyncio.run(
-                create_github_pr(
-                    repo_owner=repo_owner,
-                    repo_name=repo_name,
-                    github_token=github_token,
-                    title=title,
-                    head_branch=branch_name,
-                    base_branch=base_branch,
-                    body=pr_body,
-                )
+            pr_url, _pr_number, pr_existing = create_github_pr(
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                github_token=github_token,
+                title=title,
+                head_branch=branch_name,
+                base_branch=base_branch,
+                body=pr_body,
             )
         except Exception as exc:
             logger.exception("GitHub PR creation failed")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -11,6 +12,14 @@ from knight.runtime.repository_identity import _slugify, repository_key
 from knight.worker.config import settings
 
 _GIT_TIMEOUT = 120
+
+# Matches embedded credentials in URLs, e.g. https://x-access-token:ghs_xxx@github.com
+_CREDENTIAL_RE = re.compile(r"(https?://)([^@\s]+@)", re.IGNORECASE)
+
+
+def _scrub_credentials(text: str) -> str:
+    """Remove userinfo (credentials) from any URLs in an error string."""
+    return _CREDENTIAL_RE.sub(r"\1<redacted>@", text)
 
 
 @dataclass(slots=True)
@@ -105,7 +114,6 @@ class WorktreeProvisioner:
             branch_ref = self.sync_branch_reference(
                 repo_path=repository.repo_path,
                 branch_name=resolved_branch,
-                base_branch=resolved_base_branch,
             )
 
             self.prepare_branch_worktree(
@@ -265,13 +273,8 @@ class WorktreeProvisioner:
         *,
         repo_path: Path,
         branch_name: str,
-        base_branch: str,
     ) -> str | None:
-        remote_branch = self._resolve_remote_branch_ref(repo_path, branch_name)
-        if remote_branch:
-            return remote_branch
-
-        return None
+        return self._resolve_remote_branch_ref(repo_path, branch_name)
 
     def _checkout_existing_worktree_branch(
         self,
@@ -356,7 +359,7 @@ class WorktreeProvisioner:
         )
         if completed.returncode != 0:
             raise RuntimeError(
-                completed.stderr.strip()
-                or completed.stdout.strip()
+                _scrub_credentials(completed.stderr.strip())
+                or _scrub_credentials(completed.stdout.strip())
                 or f"command failed: {' '.join(command)}"
             )

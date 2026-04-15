@@ -18,7 +18,6 @@ from knight.runtime.filesystem import LocalWorkspace
 from knight.runtime.logging_config import (
     ResolvedLoggingSettings as RuntimeLogSettings,
     get_logger,
-    setup_logging,
 )
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.sandbox import SandboxPolicy
@@ -41,6 +40,18 @@ def _read_agents_md(workspace_path: str) -> str:
     return ""
 
 
+def _serialize_log_config(log_config: RuntimeLogSettings | None) -> dict[str, object]:
+    if log_config is None:
+        return {
+            "log_tool_results": False,
+            "log_command_output": False,
+        }
+    return {
+        "log_tool_results": log_config.log_tool_results,
+        "log_command_output": log_config.log_command_output,
+    }
+
+
 def build_initial_state(
     task: AgentTaskRequest,
     sandbox: dict[str, object] | None = None,
@@ -55,6 +66,7 @@ def build_initial_state(
     return {
         "task": task,
         "sandbox": dict(sandbox or {}),
+        "log_config": _serialize_log_config(log_config),
         "runtime_config": {
             "provider": runtime_config.provider,
             "model": runtime_config.model,
@@ -77,6 +89,7 @@ def build_initial_state(
         "iterations": 0,
         "final_message": "",
         "termination_warned": False,
+        "committed": False,
         "pr_url": "",
     }
 
@@ -203,15 +216,17 @@ def call_model(state: AgentState) -> AgentState:
 
 
 def execute_tools(state: AgentState) -> AgentState:
-    tool_map = get_toolset(state).build_tool_map()
+    toolset = get_toolset(state)
+    tool_map = {tool.name: tool for tool in toolset.build_tools()}
     last_message = state["messages"][-1]
     if not isinstance(last_message, AIMessage):
         return state
-    log_config = setup_logging()
+    log_config = state["log_config"]
 
     tool_messages: list[ToolMessage] = []
     step_results = list(state["steps"])
     pr_url = state.get("pr_url", "")
+    committed = state.get("committed", False)
 
     for tool_call in last_message.tool_calls:
         tool_name = tool_call["name"]
@@ -239,8 +254,10 @@ def execute_tools(state: AgentState) -> AgentState:
                 success = bool(output.get("exit_code", 0) == 0)
             elif tool_name == "commit_and_open_pr":
                 success = bool(output.get("success"))
-                if success and output.get("pr_url"):
-                    pr_url = output["pr_url"]
+                if success:
+                    committed = True
+                    if output.get("pr_url"):
+                        pr_url = output["pr_url"]
             else:
                 success = True
             step_result = ToolResult(
@@ -273,7 +290,7 @@ def execute_tools(state: AgentState) -> AgentState:
             )
 
         step_results.append(step_result)
-        if log_config.log_tool_results:
+        if log_config.get("log_tool_results"):
             extra = {
                 "repository": normalize_repository_identity(
                     repository_url=state["task"].repository_url,
@@ -284,12 +301,12 @@ def execute_tools(state: AgentState) -> AgentState:
                 "tool": tool_name,
                 "success": step_result.success,
             }
-            if tool_name == "run_command":
+            if tool_name == "run_command" and isinstance(step_result.output, dict):
                 extra["exit_code"] = step_result.output.get("exit_code")
-                if log_config.log_command_output:
+                if log_config.get("log_command_output"):
                     extra["stdout"] = step_result.output.get("stdout", "")
                     extra["stderr"] = step_result.output.get("stderr", "")
-            elif tool_name == "commit_and_open_pr":
+            elif tool_name == "commit_and_open_pr" and isinstance(step_result.output, dict):
                 extra["pr_url"] = step_result.output.get("pr_url")
                 extra["pr_existing"] = step_result.output.get("pr_existing")
             logger.info("agent tool executed", extra=extra)
@@ -299,13 +316,14 @@ def execute_tools(state: AgentState) -> AgentState:
         "messages": tool_messages,
         "steps": step_results,
         "status": "running",
+        "committed": committed,
         "pr_url": pr_url,
     }
 
 
 def _agent_called_commit(state: AgentState) -> bool:
     """Return True if the agent successfully called commit_and_open_pr this run."""
-    return bool(state.get("pr_url"))
+    return bool(state.get("committed"))
 
 
 def should_continue(state: AgentState) -> str:
@@ -338,18 +356,13 @@ def should_continue(state: AgentState) -> str:
 
 def warn_incomplete(state: AgentState) -> AgentState:
     """Inject a warning when the agent stops without committing its work."""
-    from uuid import uuid4
-
-    tc_id = str(uuid4())
-    warning = ToolMessage(
+    warning = HumanMessage(
         content=(
             "You stopped without calling `commit_and_open_pr`. "
             "If your implementation is complete, you MUST call `commit_and_open_pr` to push "
             "your changes and open a PR. If there is nothing to commit, explain why and "
             "call `commit_and_open_pr` to confirm the state of the repository."
-        ),
-        tool_call_id=tc_id,
-        name="system_warning",
+        )
     )
     logger.info(
         "premature termination guard triggered",
