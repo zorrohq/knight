@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-import httpx
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ def _auth_headers(token: str) -> dict[str, str]:
     return {**_GITHUB_HEADERS, "Authorization": f"Bearer {token}"}
 
 
-async def create_github_pr(
+def create_github_pr(
     *,
     repo_owner: str,
     repo_name: str,
@@ -53,52 +53,50 @@ async def create_github_pr(
         head_branch,
         base_branch,
     )
-    async with httpx.AsyncClient(timeout=30) as client:
-        try:
-            response = await client.post(
-                f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}/pulls",
-                headers=_auth_headers(github_token),
-                json=payload,
-            )
-            data = response.json()
+    try:
+        response = requests.post(
+            f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}/pulls",
+            headers=_auth_headers(github_token),
+            json=payload,
+            timeout=30,
+        )
+        data = response.json()
 
-            if response.status_code == _HTTP_CREATED:
-                pr_url = data.get("html_url")
-                pr_number = data.get("number")
-                logger.info("PR created: %s", pr_url)
-                return pr_url, pr_number, False
+        if response.status_code == _HTTP_CREATED:
+            pr_url = data.get("html_url")
+            pr_number = data.get("number")
+            logger.info("PR created: %s", pr_url)
+            return pr_url, pr_number, False
 
-            if response.status_code == _HTTP_UNPROCESSABLE:
-                # PR may already exist for this branch
-                logger.warning(
-                    "GitHub API 422 creating PR (%s), searching for existing",
-                    data.get("message"),
-                )
-                existing = await _find_existing_pr(
-                    client=client,
-                    repo_owner=repo_owner,
-                    repo_name=repo_name,
-                    github_token=github_token,
-                    head_branch=head_branch,
-                )
-                if existing:
-                    return existing[0], existing[1], True
-
-            logger.error(
-                "GitHub API error %s creating PR: %s",
-                response.status_code,
+        if response.status_code == _HTTP_UNPROCESSABLE:
+            # PR may already exist for this branch
+            logger.warning(
+                "GitHub API 422 creating PR (%s), searching for existing",
                 data.get("message"),
             )
-            return None, None, False
+            existing = _find_existing_pr(
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                github_token=github_token,
+                head_branch=head_branch,
+            )
+            if existing:
+                return existing[0], existing[1], True
 
-        except httpx.HTTPError:
-            logger.exception("HTTP error creating GitHub PR")
-            return None, None, False
+        logger.error(
+            "GitHub API error %s creating PR: %s",
+            response.status_code,
+            data.get("message"),
+        )
+        return None, None, False
+
+    except requests.RequestException:
+        logger.exception("HTTP error creating GitHub PR")
+        return None, None, False
 
 
-async def _find_existing_pr(
+def _find_existing_pr(
     *,
-    client: httpx.AsyncClient,
     repo_owner: str,
     repo_name: str,
     github_token: str,
@@ -106,11 +104,15 @@ async def _find_existing_pr(
 ) -> tuple[str | None, int | None]:
     head_ref = f"{repo_owner}:{head_branch}"
     for state in ("open", "all"):
-        response = await client.get(
-            f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}/pulls",
-            headers=_auth_headers(github_token),
-            params={"head": head_ref, "state": state, "per_page": 1},
-        )
+        try:
+            response = requests.get(
+                f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}/pulls",
+                headers=_auth_headers(github_token),
+                params={"head": head_ref, "state": state, "per_page": 1},
+                timeout=30,
+            )
+        except requests.RequestException:
+            continue
         if response.status_code != _HTTP_OK:
             continue
         prs = response.json()
@@ -120,7 +122,7 @@ async def _find_existing_pr(
     return None, None
 
 
-async def get_github_default_branch(
+def get_github_default_branch(
     *,
     repo_owner: str,
     repo_name: str,
@@ -128,19 +130,19 @@ async def get_github_default_branch(
 ) -> str:
     """Return the default branch of a GitHub repository, falling back to 'main'."""
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.get(
-                f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}",
-                headers=_auth_headers(github_token),
-            )
-            if response.status_code == _HTTP_OK:
-                branch = response.json().get("default_branch", "main")
-                logger.debug("default branch for %s/%s: %s", repo_owner, repo_name, branch)
-                return branch
-            logger.warning(
-                "could not fetch repo info (%s), falling back to 'main'",
-                response.status_code,
-            )
-    except httpx.HTTPError:
+        response = requests.get(
+            f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}",
+            headers=_auth_headers(github_token),
+            timeout=15,
+        )
+        if response.status_code == _HTTP_OK:
+            branch = response.json().get("default_branch", "main")
+            logger.debug("default branch for %s/%s: %s", repo_owner, repo_name, branch)
+            return branch
+        logger.warning(
+            "could not fetch repo info (%s), falling back to 'main'",
+            response.status_code,
+        )
+    except requests.RequestException:
         logger.exception("HTTP error fetching default branch, falling back to 'main'")
     return "main"

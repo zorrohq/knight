@@ -24,6 +24,12 @@ class APISettings(BaseSettings):
     cors_methods: list[str] = ["*"]
     cors_headers: list[str] = ["*"]
 
+    # Shared secret for the generic /api/webhooks endpoint.
+    # Set API_WEBHOOK_SECRET in the environment to require callers to send
+    # an ``X-Webhook-Secret`` header with this value.  If unset, the endpoint
+    # is unauthenticated (suitable only for local/internal use).
+    webhook_secret: str = ""
+
     github_webhook_secret: str = ""
     github_token: str = ""
     # GitHub App credentials (preferred over PAT for private repo access).

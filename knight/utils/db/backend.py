@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 from sqlalchemy import and_, desc, insert, select, update
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 
 from knight.utils.db.engine import create_database_engine
 from knight.utils.db.schema import agent_branches_table, app_config_table
@@ -77,7 +78,7 @@ class SqlAlchemyStoreBackend:
             agent_branches_table.c.issue_id == record["issue_id"],
             agent_branches_table.c.agent_branch == record["agent_branch"],
         )
-        values = {
+        update_values = {
             "repository": record["repository"],
             "issue_id": record["issue_id"],
             "base_branch": record["base_branch"],
@@ -88,19 +89,20 @@ class SqlAlchemyStoreBackend:
             "updated_at": now,
         }
         with self.engine.begin() as conn:
-            existing = conn.execute(
-                select(agent_branches_table.c.id).where(branch_filter).limit(1)
-            ).first()
-            if existing:
-                conn.execute(update(agent_branches_table).where(branch_filter).values(**values))
-            else:
+            sp = conn.begin_nested()
+            try:
                 conn.execute(
-                    insert(agent_branches_table).values(
-                        **values,
-                        created_at=now,
-                    )
+                    insert(agent_branches_table).values(**update_values, created_at=now)
                 )
-            row = conn.execute(select(agent_branches_table).where(branch_filter).limit(1)).mappings().one()
+                sp.commit()
+            except IntegrityError:
+                sp.rollback()
+                conn.execute(
+                    update(agent_branches_table).where(branch_filter).values(**update_values)
+                )
+            row = conn.execute(
+                select(agent_branches_table).where(branch_filter).limit(1)
+            ).mappings().one()
         return self._serialize_row(row)
 
     def mark_branch_status(
@@ -172,7 +174,7 @@ class SqlAlchemyStoreBackend:
             app_config_table.c.key == key,
             app_config_table.c.repository.is_not_distinct_from(repository),
         )
-        values = {
+        update_values = {
             "scope": scope,
             "repository": repository,
             "key": key,
@@ -181,26 +183,29 @@ class SqlAlchemyStoreBackend:
             "updated_at": now,
         }
         with self.engine.begin() as conn:
-            existing = conn.execute(
-                select(app_config_table.c.id, app_config_table.c.description)
-                .where(config_filter)
-                .limit(1)
-            ).mappings().first()
-            if existing:
+            sp = conn.begin_nested()
+            try:
+                conn.execute(
+                    insert(app_config_table).values(**update_values, created_at=now)
+                )
+                sp.commit()
+            except IntegrityError:
+                sp.rollback()
+                # Preserve existing description when the caller passes None.
+                existing = conn.execute(
+                    select(app_config_table.c.description)
+                    .where(config_filter)
+                    .limit(1)
+                ).mappings().first()
+                resolved_description = (
+                    description
+                    if description is not None
+                    else (existing["description"] if existing else None)
+                )
                 conn.execute(
                     update(app_config_table)
                     .where(config_filter)
-                    .values(
-                        **values,
-                        description=description if description is not None else existing["description"],
-                    )
-                )
-            else:
-                conn.execute(
-                    insert(app_config_table).values(
-                        **values,
-                        created_at=now,
-                    )
+                    .values(**update_values, description=resolved_description)
                 )
 
     def _serialize_row(self, row: Mapping[str, Any]) -> dict[str, object]:

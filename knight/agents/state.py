@@ -10,6 +10,7 @@ class AgentState(TypedDict):
     task: AgentTaskRequest
     sandbox: dict[str, Any]
     runtime_config: dict[str, Any]
+    log_config: dict[str, Any]
     provider_configured: bool
     available_tools: list[str]
     workspace_summary: dict[str, Any]
@@ -19,4 +20,5 @@ class AgentState(TypedDict):
     iterations: int
     final_message: str
     termination_warned: bool
+    committed: bool
     pr_url: str

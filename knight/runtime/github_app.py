@@ -59,7 +59,7 @@ async def get_installation_token(
     Raises:
         httpx.HTTPStatusError: if GitHub returns a non-2xx response.
     """
-    app_jwt = _make_jwt(app_id, private_key)
+    app_jwt = _make_jwt(app_id, private_key.replace("\\n", "\n"))
     url = f"{_GITHUB_API}/app/installations/{installation_id}/access_tokens"
     headers = {
         "Accept": "application/vnd.github+json",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import re
 from pathlib import Path
 import subprocess
 
@@ -8,6 +8,7 @@ from knight.agents.models import AgentTaskRequest
 from knight.runtime.authorship import (
     KNIGHT_BOT_EMAIL,
     KNIGHT_BOT_NAME,
+    CollaboratorIdentity,
     add_coauthor_trailer,
     add_pr_collaboration_note,
     make_identity,
@@ -23,6 +24,13 @@ from knight.worker.config import settings
 logger = get_logger(__name__)
 
 _GIT_TIMEOUT = 120
+
+_CREDENTIAL_RE = re.compile(r"(https?://)([^@\s]+@)", re.IGNORECASE)
+
+
+def _scrub_credentials(text: str) -> str:
+    """Remove userinfo (credentials) from any URLs in an error string."""
+    return _CREDENTIAL_RE.sub(r"\1<redacted>@", text)
 
 
 class WorkerGitOpsService:
@@ -144,11 +152,12 @@ class WorkerGitOpsService:
             )
 
         if repository_identity and task.issue_id:
+            branch_status = "pushed" if push_completed else "open"
             self.state_store.mark_branch_status(
                 repository=repository_identity,
                 issue_id=task.issue_id,
                 agent_branch=sandbox["branch_name"],
-                status="open",
+                status=branch_status,
             )
 
         return {
@@ -187,7 +196,6 @@ class WorkerGitOpsService:
         body = task.instructions.strip() or "Automated changes by Knight."
 
         # Add collaboration note if we have user identity
-        from knight.runtime.authorship import CollaboratorIdentity
         identity = (
             CollaboratorIdentity(
                 display_name=identity_name,
@@ -200,23 +208,19 @@ class WorkerGitOpsService:
         body = add_pr_collaboration_note(body, identity)
 
         try:
-            base_branch = asyncio.run(
-                get_github_default_branch(
-                    repo_owner=repo_owner,
-                    repo_name=repo_name,
-                    github_token=github_token,
-                )
+            base_branch = get_github_default_branch(
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                github_token=github_token,
             )
-            pr_url, _pr_number, pr_existing = asyncio.run(
-                create_github_pr(
-                    repo_owner=repo_owner,
-                    repo_name=repo_name,
-                    github_token=github_token,
-                    title=title,
-                    head_branch=sandbox["branch_name"],
-                    base_branch=base_branch,
-                    body=body,
-                )
+            pr_url, _pr_number, pr_existing = create_github_pr(
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                github_token=github_token,
+                title=title,
+                head_branch=sandbox["branch_name"],
+                base_branch=base_branch,
+                body=body,
             )
             if pr_url:
                 logger.info(
@@ -249,8 +253,8 @@ class WorkerGitOpsService:
         )
         if completed.returncode != 0:
             raise RuntimeError(
-                completed.stderr.strip()
-                or completed.stdout.strip()
+                _scrub_credentials(completed.stderr.strip())
+                or _scrub_credentials(completed.stdout.strip())
                 or f"command failed: {' '.join(command)}"
             )
         return completed

@@ -67,7 +67,7 @@ def run_agent_task(
             "post_run_has_changes": post_run["has_changes"],
             "post_run_commit_created": post_run["commit_created"],
             "post_run_push_completed": post_run["push_completed"],
-        "post_run_pr_url": post_run.get("pr_url") or result.pr_url,
+            "post_run_pr_url": post_run.get("pr_url") or result.pr_url,
         },
     )
 
