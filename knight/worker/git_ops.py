@@ -19,6 +19,7 @@ from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
 from knight.utils.db.state_store import BranchStateStore
 from knight.worker.commit_message import CommitMessageService
+from knight.worker.pr_description import PRDescriptionService
 from knight.worker.config import settings
 
 logger = get_logger(__name__)
@@ -36,6 +37,7 @@ def _scrub_credentials(text: str) -> str:
 class WorkerGitOpsService:
     def __init__(self) -> None:
         self.commit_messages = CommitMessageService()
+        self.pr_descriptions = PRDescriptionService()
         self.provisioner = WorktreeProvisioner()
         self.state_store = BranchStateStore()
 
@@ -134,6 +136,7 @@ class WorkerGitOpsService:
                 github_token=github_token,
                 identity_name=identity.display_name if identity else "",
                 identity_email=identity.commit_email if identity else "",
+                diff_text=diff_text,
             )
 
         if task.cleanup_worktree:
@@ -182,6 +185,7 @@ class WorkerGitOpsService:
         github_token: str,
         identity_name: str,
         identity_email: str,
+        diff_text: str = "",
     ) -> str:
         if not github_token:
             return ""
@@ -194,7 +198,7 @@ class WorkerGitOpsService:
 
         repo_owner, repo_name = repository_identity.split("/", 1)
         title = f"feat: {task.task_type} for {task.issue_id}" if task.issue_id else f"feat: {task.task_type}"
-        body = task.instructions.strip() or "Automated changes by Knight."
+        body = self.pr_descriptions.generate(task=task, diff_text=diff_text)
 
         # Add collaboration note if we have user identity
         identity = (

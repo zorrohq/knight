@@ -30,6 +30,7 @@ from knight.runtime.github import (
     get_github_default_branch,
 )
 from knight.runtime.repository_identity import normalize_repository_identity
+from knight.worker.pr_description import PRDescriptionService
 
 logger = logging.getLogger(__name__)
 
@@ -444,15 +445,20 @@ class AgentToolset:
 
         # Build commit message with attribution
         final_commit_msg = commit_message or title
+        diff_text = self._git(["git", "diff", "HEAD"], cwd=worktree_path, check=False).stdout
+        generated_body = PRDescriptionService().generate(
+            task=self.task,
+            diff_text=diff_text,
+        ) if self.task else body
         if self.task:
             identity = make_identity(
                 name=self.task.author_name,
                 email=self.task.author_email,
             )
             final_commit_msg = add_coauthor_trailer(final_commit_msg, identity)
-            pr_body = add_pr_collaboration_note(body, identity)
+            pr_body = add_pr_collaboration_note(generated_body, identity)
         else:
-            pr_body = body
+            pr_body = generated_body
 
         if has_uncommitted:
             self._git(
