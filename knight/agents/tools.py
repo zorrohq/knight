@@ -28,6 +28,7 @@ from knight.runtime.filesystem import LocalWorkspace
 from knight.runtime.github import (
     create_github_pr,
     get_github_default_branch,
+    post_issue_comment,
 )
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.worker.pr_description import PRDescriptionService
@@ -541,6 +542,18 @@ class AgentToolset:
 
         if not pr_url:
             return {"success": False, "error": "GitHub PR creation returned no URL", "pr_url": None}
+
+        if not pr_existing and self.task and self.task.issue_id and "#" in self.task.issue_id:
+            number = self.task.issue_id.split("#", 1)[-1]
+            if number.isdigit():
+                mention = f"@{self.task.author_name}" if self.task.author_name else "Hey"
+                post_issue_comment(
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    issue_number=int(number),
+                    github_token=github_token,
+                    body=f"Hey {mention}! I've opened a PR for your review: {pr_url}",
+                )
 
         return {"success": True, "pr_url": pr_url, "pr_existing": pr_existing, "error": None}
 

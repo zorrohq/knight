@@ -121,6 +121,34 @@ def _find_existing_pr(
     return None, None
 
 
+def post_issue_comment(
+    *,
+    repo_owner: str,
+    repo_name: str,
+    issue_number: int,
+    github_token: str,
+    body: str,
+) -> bool:
+    """Post a comment on a GitHub issue. Returns True on success."""
+    try:
+        response = requests.post(
+            f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}/issues/{issue_number}/comments",
+            headers=_auth_headers(github_token),
+            json={"body": body},
+            timeout=30,
+        )
+        if response.status_code == _HTTP_CREATED:
+            return True
+        logger.warning(
+            "GitHub API error %s posting issue comment: %s",
+            response.status_code,
+            response.json().get("message"),
+        )
+    except requests.RequestException:
+        logger.exception("HTTP error posting GitHub issue comment")
+    return False
+
+
 def get_github_default_branch(
     *,
     repo_owner: str,

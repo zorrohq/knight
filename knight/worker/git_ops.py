@@ -13,7 +13,7 @@ from knight.runtime.authorship import (
     add_pr_collaboration_note,
     make_identity,
 )
-from knight.runtime.github import create_github_pr, get_github_default_branch
+from knight.runtime.github import create_github_pr, get_github_default_branch, post_issue_comment
 from knight.runtime.logging_config import get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
@@ -239,6 +239,14 @@ class WorkerGitOpsService:
                         "pr_existing": pr_existing,
                     },
                 )
+                if not pr_existing:
+                    self._post_pr_notification(
+                        task=task,
+                        repo_owner=repo_owner,
+                        repo_name=repo_name,
+                        github_token=github_token,
+                        pr_url=pr_url,
+                    )
                 return pr_url
         except Exception:
             logger.exception(
@@ -246,6 +254,30 @@ class WorkerGitOpsService:
                 extra={"repository": repository_identity, "issue_id": task.issue_id},
             )
         return ""
+
+    def _post_pr_notification(
+        self,
+        *,
+        task: AgentTaskRequest,
+        repo_owner: str,
+        repo_name: str,
+        github_token: str,
+        pr_url: str,
+    ) -> None:
+        if not task.issue_id or "#" not in task.issue_id:
+            return
+        number = task.issue_id.split("#", 1)[-1]
+        if not number.isdigit():
+            return
+        mention = f"@{task.author_name}" if task.author_name else "Hey"
+        comment = f"Hey {mention}! I've opened a PR for your review: {pr_url}"
+        post_issue_comment(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            issue_number=int(number),
+            github_token=github_token,
+            body=comment,
+        )
 
     def _run(self, command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
         completed = subprocess.run(
