@@ -71,13 +71,15 @@ def run_agent_task(
         },
     )
 
+    task_dump = result.task.model_dump()
+    task_dump["github_token"] = "<redacted>"
     return {
         "task_id": self.request.id,
         "status": result.status,
         "provider_configured": result.provider_configured,
         "final_message": result.final_message,
         "iterations": result.iterations,
-        "task": result.task.model_dump(),
+        "task": task_dump,
         "available_tools": result.available_tools,
         "sandbox": result.sandbox,
         "workspace_summary": result.workspace_summary,
