@@ -44,7 +44,6 @@ def create_github_pr(
         "head": head_branch,
         "base": base_branch,
         "body": body,
-        "draft": True,
     }
     logger.info(
         "creating PR: repo=%s/%s head=%s base=%s",

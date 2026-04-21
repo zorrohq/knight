@@ -422,14 +422,22 @@ class AgentToolset:
         has_uncommitted = bool(status.stdout.strip())
 
         # Check for unpushed commits. When the branch doesn't exist on the remote
-        # yet, the range ref fails (exit_code != 0) — treat that as "has unpushed"
-        # because the branch itself needs to be pushed for the first time.
+        # yet, git log fails — fall back to checking commits ahead of base branch.
         unpushed = self._git(
             ["git", "log", "--oneline", f"origin/{branch_name}..HEAD"],
             cwd=worktree_path,
             check=False,
         )
-        has_unpushed = bool(unpushed.stdout.strip()) or unpushed.returncode != 0
+        if unpushed.returncode != 0:
+            base_branch_ref = (self.task.base_branch if self.task else "") or "main"
+            ahead_of_base = self._git(
+                ["git", "log", "--oneline", f"origin/{base_branch_ref}..HEAD"],
+                cwd=worktree_path,
+                check=False,
+            )
+            has_unpushed = bool(ahead_of_base.stdout.strip())
+        else:
+            has_unpushed = bool(unpushed.stdout.strip())
 
         if not has_uncommitted and not has_unpushed:
             return {"success": False, "error": "no changes detected", "pr_url": None}

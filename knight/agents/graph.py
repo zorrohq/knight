@@ -203,7 +203,7 @@ def call_model(state: AgentState) -> AgentState:
             "issue_id": state["task"].issue_id,
             "branch_name": state["sandbox"].get("branch_name"),
             "iteration": state["iterations"] + 1,
-            "tool_call_count": len(response.tool_calls),
+            "tool_calls": [tc["name"] for tc in response.tool_calls],
         },
     )
 
@@ -290,26 +290,43 @@ def execute_tools(state: AgentState) -> AgentState:
             )
 
         step_results.append(step_result)
-        if log_config.get("log_tool_results"):
-            extra = {
-                "repository": normalize_repository_identity(
-                    repository_url=state["task"].repository_url,
-                    repository_local_path=state["task"].repository_local_path,
-                ),
-                "issue_id": state["task"].issue_id,
-                "branch_name": state["sandbox"].get("branch_name"),
-                "tool": tool_name,
-                "success": step_result.success,
-            }
-            if tool_name == "run_command" and isinstance(step_result.output, dict):
+        extra: dict[str, object] = {
+            "repository": normalize_repository_identity(
+                repository_url=state["task"].repository_url,
+                repository_local_path=state["task"].repository_local_path,
+            ),
+            "issue_id": state["task"].issue_id,
+            "branch_name": state["sandbox"].get("branch_name"),
+            "tool": tool_name,
+            "success": step_result.success,
+        }
+        args = tool_call.get("args") or {}
+        if tool_name == "run_command":
+            extra["command"] = args.get("command", "")
+            if isinstance(step_result.output, dict):
                 extra["exit_code"] = step_result.output.get("exit_code")
                 if log_config.get("log_command_output"):
                     extra["stdout"] = step_result.output.get("stdout", "")
                     extra["stderr"] = step_result.output.get("stderr", "")
-            elif tool_name == "commit_and_open_pr" and isinstance(step_result.output, dict):
+        elif tool_name in ("read_file", "write_file", "replace_in_file"):
+            extra["path"] = args.get("path", "")
+        elif tool_name == "list_files":
+            extra["path"] = args.get("path", "")
+            extra["recursive"] = args.get("recursive", False)
+        elif tool_name == "search_files":
+            extra["pattern"] = args.get("pattern", "")
+        elif tool_name == "fetch_url":
+            extra["url"] = args.get("url", "")
+        elif tool_name == "commit_and_open_pr":
+            extra["title"] = args.get("title", "")
+            if isinstance(step_result.output, dict):
                 extra["pr_url"] = step_result.output.get("pr_url")
                 extra["pr_existing"] = step_result.output.get("pr_existing")
-            logger.info("agent tool executed", extra=extra)
+                if not step_result.success:
+                    extra["error"] = step_result.output.get("error")
+        if not step_result.success and "error" not in extra:
+            extra["error"] = step_result.error
+        logger.info("agent tool executed", extra=extra)
 
     return {
         **state,
