@@ -21,7 +21,7 @@ class PRDescriptionService:
         trimmed_diff = diff_text[: settings.worker_commit_max_diff_chars]
 
         if model is None:
-            return self._fallback_description(task)
+            return self._append_issue_ref(self._fallback_description(task), task)
 
         prompt = (
             "Write a concise pull request description as a changelog summarising the changes made. "
@@ -35,9 +35,20 @@ class PRDescriptionService:
         response = model.invoke(prompt)
         content = response.content
         if isinstance(content, str) and content.strip():
-            return content.strip()
-        return self._fallback_description(task)
+            return self._append_issue_ref(content.strip(), task)
+        return self._append_issue_ref(self._fallback_description(task), task)
+
+    def _issue_ref(self, task: AgentTaskRequest) -> str:
+        if not task.issue_id or "#" not in task.issue_id:
+            return ""
+        number = task.issue_id.split("#", 1)[-1]
+        return f"Closes #{number}" if number.isdigit() else ""
+
+    def _append_issue_ref(self, body: str, task: AgentTaskRequest) -> str:
+        ref = self._issue_ref(task)
+        if not ref:
+            return body
+        return f"{body}\n\n---\n\n{ref}"
 
     def _fallback_description(self, task: AgentTaskRequest) -> str:
-        issue_ref = f" for {task.issue_id}" if task.issue_id else ""
-        return f"Automated changes{issue_ref}.\n\n{task.instructions or ''}".strip()
+        return f"Automated changes by Knight.\n\n{task.instructions or ''}".strip()
