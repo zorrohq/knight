@@ -171,21 +171,29 @@ class WorktreeProvisioner:
             branch_ref=branch_ref,
         )
 
-    def remove_worktree(self, *, repo_path: Path, worktree_path: Path) -> None:
-        if not worktree_path.exists():
-            return
+    def remove_worktree(
+        self, *, repo_path: Path, worktree_path: Path, branch_name: str = ""
+    ) -> None:
         lock_path = repo_path.parent / ".repo.lock"
         with self.lock_manager.acquire(lock_path):
-            completed = subprocess.run(
-                ["git", "worktree", "remove", "--force", str(worktree_path)],
-                cwd=repo_path,
-                text=True,
-                capture_output=True,
-                timeout=_GIT_TIMEOUT,
-                check=False,
-            )
-            if completed.returncode != 0 and worktree_path.exists():
-                shutil.rmtree(worktree_path, ignore_errors=True)
+            if worktree_path.exists():
+                completed = subprocess.run(
+                    ["git", "worktree", "remove", "--force", str(worktree_path)],
+                    cwd=repo_path,
+                    text=True,
+                    capture_output=True,
+                    timeout=_GIT_TIMEOUT,
+                    check=False,
+                )
+                if completed.returncode != 0 and worktree_path.exists():
+                    shutil.rmtree(worktree_path, ignore_errors=True)
+            if branch_name:
+                subprocess.run(
+                    ["git", "branch", "-D", branch_name],
+                    cwd=repo_path,
+                    capture_output=True,
+                    check=False,
+                )
 
     @staticmethod
     def _inject_token_into_url(url: str, token: str) -> str:

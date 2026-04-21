@@ -140,6 +140,7 @@ class WorkerGitOpsService:
             self.provisioner.remove_worktree(
                 repo_path=repo_path,
                 worktree_path=worktree_path,
+                branch_name=sandbox["branch_name"],
             )
             logger.info(
                 "worker worktree cleaned up",
