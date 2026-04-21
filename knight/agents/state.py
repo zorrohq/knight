@@ -19,6 +19,6 @@ class AgentState(TypedDict):
     status: str
     iterations: int
     final_message: str
-    termination_warned: bool
+    termination_warnings: int
     committed: bool
     pr_url: str

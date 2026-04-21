@@ -136,7 +136,8 @@ def _extract_task(
     if event == "issue_comment":
         if payload.get("action") != "created":
             return None
-        comment_body = payload.get("comment", {}).get("body") or ""
+        comment = payload.get("comment", {})
+        comment_body = comment.get("body") or ""
         if not _contains_trigger(comment_body):
             return None
         issue = payload.get("issue", {})
@@ -149,6 +150,7 @@ def _extract_task(
             "issue_id": f"{repo_full_name}#{issue_number}",
             "instructions": instructions,
             "task_type": "issue_comment",
+            "trigger_comment_id": comment.get("id"),
         }
 
     if event == "pull_request_review_comment":

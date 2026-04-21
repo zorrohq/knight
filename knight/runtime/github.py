@@ -121,6 +121,28 @@ def _find_existing_pr(
     return None, None
 
 
+def react_to_comment(
+    *,
+    repo_owner: str,
+    repo_name: str,
+    comment_id: int,
+    github_token: str,
+    reaction: str = "eyes",
+) -> bool:
+    """Add a reaction to an issue comment. Returns True on success."""
+    try:
+        response = requests.post(
+            f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}/issues/comments/{comment_id}/reactions",
+            headers=_auth_headers(github_token),
+            json={"content": reaction},
+            timeout=15,
+        )
+        return response.status_code in (_HTTP_CREATED, 200)
+    except requests.RequestException:
+        logger.exception("HTTP error reacting to GitHub comment")
+    return False
+
+
 def post_issue_comment(
     *,
     repo_owner: str,

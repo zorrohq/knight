@@ -68,6 +68,11 @@ For tasks that require code changes, follow this order:
 **Strict requirement:** You must call `commit_and_open_pr` before claiming the task is complete.
 Only claim "PR opened" if `commit_and_open_pr` returns `success: true` and a `pr_url`.
 If it returns an error or `success: false`, state the error explicitly and do not claim success.
+
+**CRITICAL — No planning without acting:**
+Do NOT describe what changes you plan to make and then stop. Do NOT list "ideas" or "suggestions".
+You must use `write_file` or `replace_in_file` to actually write the code, then call `commit_and_open_pr`.
+Describing changes without making them is a failure. The only acceptable output is working code in the repository.
 """
 
 _TOOL_USAGE_SECTION = """---
@@ -142,6 +147,8 @@ _CORE_BEHAVIOR_SECTION = """---
 - **Accuracy:** Never guess. Use tools to gather accurate information about files and structure.
 - **Autonomy:** Do not ask for permission mid-task. Run linters, fix errors, and call
   `commit_and_open_pr` without waiting for confirmation.
+- **Act, don't describe:** Never respond with a list of things you *could* do. Write the code using
+  `write_file` or `replace_in_file` and commit it. Descriptions without tool calls are failures.
 - **Parallel tool calls:** When multiple tool calls are independent, call them together in a
   single turn to save iterations.
 """

@@ -88,7 +88,7 @@ def build_initial_state(
         "status": "pending",
         "iterations": 0,
         "final_message": "",
-        "termination_warned": False,
+        "termination_warnings": 0,
         "committed": False,
         "pr_url": "",
     }
@@ -207,10 +207,16 @@ def call_model(state: AgentState) -> AgentState:
         },
     )
 
+    # Don't count commit_and_open_pr against the iteration limit — it's a
+    # mandatory closing step, not an exploration step.
+    is_commit_only = (
+        len(response.tool_calls) == 1
+        and response.tool_calls[0]["name"] == "commit_and_open_pr"
+    )
     return {
         **state,
         "messages": [response],
-        "iterations": state["iterations"] + 1,
+        "iterations": state["iterations"] + (0 if is_commit_only else 1),
         "status": "running",
     }
 
@@ -363,7 +369,7 @@ def should_continue(state: AgentState) -> str:
         isinstance(last_message, AIMessage)
         and not last_message.tool_calls
         and not _agent_called_commit(state)
-        and not state.get("termination_warned")
+        and state.get("termination_warnings", 0) < 3
         and runtime_config.allow_commit_and_push
     ):
         return "warn_incomplete"
@@ -373,25 +379,33 @@ def should_continue(state: AgentState) -> str:
 
 def warn_incomplete(state: AgentState) -> AgentState:
     """Inject a warning when the agent stops without committing its work."""
-    warning = HumanMessage(
-        content=(
-            "You stopped without calling `commit_and_open_pr`. "
-            "If your implementation is complete, you MUST call `commit_and_open_pr` to push "
-            "your changes and open a PR. If there is nothing to commit, explain why and "
-            "call `commit_and_open_pr` to confirm the state of the repository."
+    warnings_so_far = state.get("termination_warnings", 0)
+    if warnings_so_far == 0:
+        content = (
+            "You stopped without calling `commit_and_open_pr` and without making any file changes. "
+            "Do NOT describe what you plan to do — actually do it. "
+            "Use `write_file` or `replace_in_file` to make the code changes now, then call "
+            "`commit_and_open_pr` to push and open a PR."
         )
-    )
+    else:
+        content = (
+            f"WARNING (attempt {warnings_so_far + 1}/3): You are still describing instead of acting. "
+            "STOP describing. Use `write_file` or `replace_in_file` RIGHT NOW to write the actual code. "
+            "Then call `commit_and_open_pr`. This is your final opportunity before the session ends."
+        )
+    warning = HumanMessage(content=content)
     logger.info(
         "premature termination guard triggered",
         extra={
             "issue_id": state["task"].issue_id,
             "iterations": state["iterations"],
+            "warning_number": warnings_so_far + 1,
         },
     )
     return {
         **state,
         "messages": [warning],
-        "termination_warned": True,
+        "termination_warnings": warnings_so_far + 1,
         "status": "running",
     }
 

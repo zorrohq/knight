@@ -239,14 +239,14 @@ class WorkerGitOpsService:
                         "pr_existing": pr_existing,
                     },
                 )
-                if not pr_existing:
-                    self._post_pr_notification(
-                        task=task,
-                        repo_owner=repo_owner,
-                        repo_name=repo_name,
-                        github_token=github_token,
-                        pr_url=pr_url,
-                    )
+                self._post_pr_notification(
+                    task=task,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    github_token=github_token,
+                    pr_url=pr_url,
+                    pr_existing=pr_existing,
+                )
                 return pr_url
         except Exception:
             logger.exception(
@@ -263,6 +263,7 @@ class WorkerGitOpsService:
         repo_name: str,
         github_token: str,
         pr_url: str,
+        pr_existing: bool = False,
     ) -> None:
         if not task.issue_id or "#" not in task.issue_id:
             return
@@ -270,7 +271,10 @@ class WorkerGitOpsService:
         if not number.isdigit():
             return
         mention = f"@{task.author_name}" if task.author_name else "Hey"
-        comment = f"Hey {mention}! I've opened a PR for your review: {pr_url}"
+        if pr_existing:
+            comment = f"Hey {mention}! I've pushed updates to the existing PR: {pr_url}"
+        else:
+            comment = f"Hey {mention}! I've opened a PR for your review: {pr_url}"
         post_issue_comment(
             repo_owner=repo_owner,
             repo_name=repo_name,

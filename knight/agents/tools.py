@@ -543,16 +543,20 @@ class AgentToolset:
         if not pr_url:
             return {"success": False, "error": "GitHub PR creation returned no URL", "pr_url": None}
 
-        if not pr_existing and self.task and self.task.issue_id and "#" in self.task.issue_id:
+        if self.task and self.task.issue_id and "#" in self.task.issue_id:
             number = self.task.issue_id.split("#", 1)[-1]
             if number.isdigit():
                 mention = f"@{self.task.author_name}" if self.task.author_name else "Hey"
+                if pr_existing:
+                    body = f"Hey {mention}! I've pushed updates to the existing PR: {pr_url}"
+                else:
+                    body = f"Hey {mention}! I've opened a PR for your review: {pr_url}"
                 post_issue_comment(
                     repo_owner=repo_owner,
                     repo_name=repo_name,
                     issue_number=int(number),
                     github_token=github_token,
-                    body=f"Hey {mention}! I've opened a PR for your review: {pr_url}",
+                    body=body,
                 )
 
         return {"success": True, "pr_url": pr_url, "pr_existing": pr_existing, "error": None}
