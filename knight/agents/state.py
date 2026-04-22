@@ -20,5 +20,5 @@ class AgentState(TypedDict):
     iterations: int
     final_message: str
     termination_warnings: int
-    committed: bool
+    files_written: bool
     pr_url: str

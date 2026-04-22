@@ -14,7 +14,6 @@ ToolName = Literal[
     "run_command",
     "http_request",
     "fetch_url",
-    "commit_and_open_pr",
 ]
 
 

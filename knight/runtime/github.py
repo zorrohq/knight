@@ -171,6 +171,24 @@ def post_issue_comment(
     return False
 
 
+def post_pr_comment(
+    *,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: int,
+    github_token: str,
+    body: str,
+) -> bool:
+    """Post a comment on a GitHub pull request. Returns True on success."""
+    return post_issue_comment(
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        issue_number=pr_number,
+        github_token=github_token,
+        body=body,
+    )
+
+
 def get_github_default_branch(
     *,
     repo_owner: str,

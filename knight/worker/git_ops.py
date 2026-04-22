@@ -13,13 +13,13 @@ from knight.runtime.authorship import (
     add_pr_collaboration_note,
     make_identity,
 )
-from knight.runtime.github import create_github_pr, get_github_default_branch, post_issue_comment
+from knight.runtime.github import create_github_pr, get_github_default_branch, post_issue_comment, post_pr_comment
 from knight.runtime.logging_config import get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
 from knight.utils.db.state_store import BranchStateStore
 from knight.worker.commit_message import CommitMessageService
-from knight.worker.pr_description import PRDescriptionService
+from knight.worker.pr_description import ChangelogService
 from knight.worker.config import settings
 
 logger = get_logger(__name__)
@@ -37,7 +37,7 @@ def _scrub_credentials(text: str) -> str:
 class WorkerGitOpsService:
     def __init__(self) -> None:
         self.commit_messages = CommitMessageService()
-        self.pr_descriptions = PRDescriptionService()
+        self.changelog = ChangelogService()
         self.provisioner = WorktreeProvisioner()
         self.state_store = BranchStateStore()
 
@@ -198,7 +198,7 @@ class WorkerGitOpsService:
 
         repo_owner, repo_name = repository_identity.split("/", 1)
         title = f"feat: {task.task_type} for {task.issue_id}" if task.issue_id else f"feat: {task.task_type}"
-        body = self.pr_descriptions.generate(task=task, diff_text=diff_text)
+        body = self.changelog.for_pr_body(task=task, diff_text=diff_text)
 
         # Add collaboration note if we have user identity
         identity = (
@@ -218,7 +218,7 @@ class WorkerGitOpsService:
                 repo_name=repo_name,
                 github_token=github_token,
             )
-            pr_url, _pr_number, pr_existing = create_github_pr(
+            pr_url, pr_number, pr_existing = create_github_pr(
                 repo_owner=repo_owner,
                 repo_name=repo_name,
                 github_token=github_token,
@@ -239,6 +239,15 @@ class WorkerGitOpsService:
                         "pr_existing": pr_existing,
                     },
                 )
+                if pr_existing and pr_number and diff_text:
+                    update_comment = self.changelog.generate(task=task, diff_text=diff_text)
+                    post_pr_comment(
+                        repo_owner=repo_owner,
+                        repo_name=repo_name,
+                        pr_number=pr_number,
+                        github_token=github_token,
+                        body=update_comment,
+                    )
                 self._post_pr_notification(
                     task=task,
                     repo_owner=repo_owner,

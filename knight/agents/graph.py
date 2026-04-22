@@ -89,7 +89,7 @@ def build_initial_state(
         "iterations": 0,
         "final_message": "",
         "termination_warnings": 0,
-        "committed": False,
+        "files_written": False,
         "pr_url": "",
     }
 
@@ -207,16 +207,10 @@ def call_model(state: AgentState) -> AgentState:
         },
     )
 
-    # Don't count commit_and_open_pr against the iteration limit — it's a
-    # mandatory closing step, not an exploration step.
-    is_commit_only = (
-        len(response.tool_calls) == 1
-        and response.tool_calls[0]["name"] == "commit_and_open_pr"
-    )
     return {
         **state,
         "messages": [response],
-        "iterations": state["iterations"] + (0 if is_commit_only else 1),
+        "iterations": state["iterations"] + 1,
         "status": "running",
     }
 
@@ -231,8 +225,7 @@ def execute_tools(state: AgentState) -> AgentState:
 
     tool_messages: list[ToolMessage] = []
     step_results = list(state["steps"])
-    pr_url = state.get("pr_url", "")
-    committed = state.get("committed", False)
+    files_written = state.get("files_written", False)
 
     for tool_call in last_message.tool_calls:
         tool_name = tool_call["name"]
@@ -258,14 +251,10 @@ def execute_tools(state: AgentState) -> AgentState:
             output = tool.invoke(tool_call["args"])
             if tool_name == "run_command":
                 success = bool(output.get("exit_code", 0) == 0)
-            elif tool_name == "commit_and_open_pr":
-                success = bool(output.get("success"))
-                if success:
-                    committed = True
-                    if output.get("pr_url"):
-                        pr_url = output["pr_url"]
             else:
                 success = True
+            if tool_name in ("write_file", "replace_in_file") and success:
+                files_written = True
             step_result = ToolResult(
                 tool=tool_name,
                 success=success,
@@ -323,13 +312,6 @@ def execute_tools(state: AgentState) -> AgentState:
             extra["pattern"] = args.get("pattern", "")
         elif tool_name == "fetch_url":
             extra["url"] = args.get("url", "")
-        elif tool_name == "commit_and_open_pr":
-            extra["title"] = args.get("title", "")
-            if isinstance(step_result.output, dict):
-                extra["pr_url"] = step_result.output.get("pr_url")
-                extra["pr_existing"] = step_result.output.get("pr_existing")
-                if not step_result.success:
-                    extra["error"] = step_result.output.get("error")
         if not step_result.success and "error" not in extra:
             extra["error"] = step_result.error
         logger.info("agent tool executed", extra=extra)
@@ -339,14 +321,8 @@ def execute_tools(state: AgentState) -> AgentState:
         "messages": tool_messages,
         "steps": step_results,
         "status": "running",
-        "committed": committed,
-        "pr_url": pr_url,
+        "files_written": files_written,
     }
-
-
-def _agent_called_commit(state: AgentState) -> bool:
-    """Return True if the agent successfully called commit_and_open_pr this run."""
-    return bool(state.get("committed"))
 
 
 def should_continue(state: AgentState) -> str:
@@ -362,15 +338,13 @@ def should_continue(state: AgentState) -> str:
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return "execute_tools"
 
-    # Premature-termination guard.
-    # If the agent wants to stop without having committed, and it hasn't been
-    # warned yet, inject a reminder and loop back once.
+    # Premature-termination guard: agent stopped without writing any files.
     if (
         isinstance(last_message, AIMessage)
         and not last_message.tool_calls
-        and not _agent_called_commit(state)
+        and not state.get("files_written", False)
         and state.get("termination_warnings", 0) < 3
-        and runtime_config.allow_commit_and_push
+        and runtime_config.allow_write_files
     ):
         return "warn_incomplete"
 
@@ -382,16 +356,15 @@ def warn_incomplete(state: AgentState) -> AgentState:
     warnings_so_far = state.get("termination_warnings", 0)
     if warnings_so_far == 0:
         content = (
-            "You stopped without calling `commit_and_open_pr` and without making any file changes. "
+            "You stopped without making any file changes. "
             "Do NOT describe what you plan to do — actually do it. "
-            "Use `write_file` or `replace_in_file` to make the code changes now, then call "
-            "`commit_and_open_pr` to push and open a PR."
+            "Use `write_file` or `replace_in_file` to make the code changes now."
         )
     else:
         content = (
             f"WARNING (attempt {warnings_so_far + 1}/3): You are still describing instead of acting. "
-            "STOP describing. Use `write_file` or `replace_in_file` RIGHT NOW to write the actual code. "
-            "Then call `commit_and_open_pr`. This is your final opportunity before the session ends."
+            "STOP. Use `write_file` or `replace_in_file` RIGHT NOW to write the actual code. "
+            "This is your final opportunity before the session ends."
         )
     warning = HumanMessage(content=content)
     logger.info(

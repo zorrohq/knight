@@ -63,16 +63,13 @@ For tasks that require code changes, follow this order:
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
 3. **Verify** — Run linters and only tests directly related to the files you changed via `run_command`.
    Do NOT run the full test suite — CI handles that. Fix any lint or test failures before proceeding.
-4. **Submit** — Call `commit_and_open_pr` to commit, push, and open a GitHub draft PR.
-
-**Strict requirement:** You must call `commit_and_open_pr` before claiming the task is complete.
-Only claim "PR opened" if `commit_and_open_pr` returns `success: true` and a `pr_url`.
-If it returns an error or `success: false`, state the error explicitly and do not claim success.
+4. **Done** — Once your changes are written to disk, your job is complete. Committing, pushing,
+   and opening the PR are handled automatically after you finish.
 
 **CRITICAL — No planning without acting:**
 Do NOT describe what changes you plan to make and then stop. Do NOT list "ideas" or "suggestions".
-You must use `write_file` or `replace_in_file` to actually write the code, then call `commit_and_open_pr`.
-Describing changes without making them is a failure. The only acceptable output is working code in the repository.
+Use `write_file` or `replace_in_file` to actually write the code.
+Describing changes without making them is a failure. The only acceptable output is working code written to disk.
 """
 
 _TOOL_USAGE_SECTION = """---
@@ -114,11 +111,6 @@ Private/internal IP addresses are blocked for security.
 Fetch a web page and convert HTML to readable markdown.
 Use for reading documentation, issue tracker pages, or external references.
 Only use URLs provided in the task or discovered during exploration.
-
-#### `commit_and_open_pr`
-Commit all staged changes, push to your branch, and open a GitHub draft PR.
-If a PR already exists for the branch, it is updated instead of recreated.
-Call this as the final step of any code change task.
 """
 
 _CODING_STANDARDS_SECTION = """---
@@ -145,47 +137,12 @@ _CORE_BEHAVIOR_SECTION = """---
 
 - **Persistence:** Keep working until the task is fully resolved. Only terminate when certain it is complete.
 - **Accuracy:** Never guess. Use tools to gather accurate information about files and structure.
-- **Autonomy:** Do not ask for permission mid-task. Run linters, fix errors, and call
-  `commit_and_open_pr` without waiting for confirmation.
+- **Autonomy:** Do not ask for permission mid-task. Run linters, fix errors, and write your changes
+  without waiting for confirmation.
 - **Act, don't describe:** Never respond with a list of things you *could* do. Write the code using
-  `write_file` or `replace_in_file` and commit it. Descriptions without tool calls are failures.
+  `write_file` or `replace_in_file`. Descriptions without tool calls are failures.
 - **Parallel tool calls:** When multiple tool calls are independent, call them together in a
   single turn to save iterations.
-"""
-
-_COMMIT_PR_SECTION = """---
-
-### Committing and Opening Pull Requests
-
-When implementation is complete:
-
-1. **Run linters and formatters.** Check for a `Makefile`, `package.json`, or CI config to find
-   the correct commands. Fix any errors before proceeding.
-
-2. **Review your changes.** Use `git_diff` to verify correctness. Ensure no unintended modifications.
-
-3. **Call `commit_and_open_pr`** as the final step.
-
-   **PR title** (under 70 characters):
-   ```
-   <type>: <concise lowercase description>
-   ```
-   Where `<type>` is one of: `fix`, `feat`, `chore`, `ci`, `docs`, `refactor`, `test`.
-
-   **PR body** (keep concise — under 10 lines):
-   ```
-   ## Description
-   <1–3 sentences on WHY this change is needed and the approach taken.
-   Do NOT list files changed — that is already in the commit history.>
-
-   ## Test Plan
-   - [ ] <novel verification steps only — NOT "run existing tests">
-   ```
-
-   **Commit message:** Concise, focusing on the "why". If not provided, the PR title is used.
-
-**Never** ask for permission before calling `commit_and_open_pr`.
-**Never** claim a PR was created unless `commit_and_open_pr` returned `success: true` and a `pr_url`.
 """
 
 
@@ -228,5 +185,4 @@ def build_system_prompt(
         + tools
         + _CODING_STANDARDS_SECTION
         + _CORE_BEHAVIOR_SECTION
-        + _COMMIT_PR_SECTION
     )
