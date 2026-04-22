@@ -10,8 +10,10 @@ class AgentSettings(BaseSettings):
 
     agent_name: str = "knight-coding-agent"
     agent_provider: str = ""
-    agent_model: str = ""
-    agent_max_steps: int = 12
+    agent_model_default: str = ""
+    agent_model_high: str = ""
+    agent_model_low: str = ""
+    agent_max_steps: int = 25
     agent_workspace_root: str = "."
     agent_command_timeout_seconds: int = 300
     agent_max_command_output_chars: int = 12000

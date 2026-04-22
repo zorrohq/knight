@@ -17,7 +17,7 @@ class CommitMessageService:
             repository_local_path=task.repository_local_path,
         ) or None
         runtime_config = AgentConfigResolver().resolve(repository=repository_identity)
-        model = create_agent_model(runtime_config)
+        model = create_agent_model(runtime_config, tier="low")
         trimmed_diff = diff_text[: settings.worker_commit_max_diff_chars]
 
         if model is None:

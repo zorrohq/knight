@@ -16,7 +16,7 @@ DEFAULT_APP_CONFIG: list[dict[str, object]] = [
     {
         "key": "logging_format",
         "value": "json",
-        "description": "Log formatter type. Allowed values are text or json.",
+        "description": "Log formatter type. Allowed values: text, json.",
     },
     {
         "key": "logging_include_timestamp",
@@ -45,13 +45,23 @@ DEFAULT_APP_CONFIG: list[dict[str, object]] = [
     },
     {
         "key": "agent_provider",
-        "value": "",
-        "description": "Model provider used by the coding agent.",
+        "value": "openai",
+        "description": "Model provider. Allowed values: openai, anthropic, google-genai.",
     },
     {
-        "key": "agent_model",
-        "value": "",
-        "description": "Model name used by the coding agent.",
+        "key": "agent_model_default",
+        "value": "gpt-4o-mini",
+        "description": "Default model. Used when no tier-specific model is configured.",
+    },
+    {
+        "key": "agent_model_high",
+        "value": "gpt-4o",
+        "description": "High-tier model for coding tasks. Falls back to agent_model_default if unset.",
+    },
+    {
+        "key": "agent_model_low",
+        "value": "gpt-4o-mini",
+        "description": "Low-tier model for lightweight tasks (commit messages, changelogs). Falls back to agent_model_default if unset.",
     },
     {
         "key": "agent_temperature",
@@ -60,7 +70,7 @@ DEFAULT_APP_CONFIG: list[dict[str, object]] = [
     },
     {
         "key": "agent_max_steps",
-        "value": 12,
+        "value": 25,
         "description": "Maximum number of model/tool iterations for the coding agent.",
     },
     {
@@ -106,6 +116,9 @@ DEFAULT_APP_CONFIG: list[dict[str, object]] = [
 def initialize_database(database_url: str) -> None:
     engine = create_database_engine(database_url)
     metadata.create_all(engine)
+    with engine.begin() as conn:
+        for table in reversed(metadata.sorted_tables):
+            conn.execute(table.delete())
     backend = create_store_backend(database_url)
     for item in DEFAULT_APP_CONFIG:
         backend.upsert_config_value(
