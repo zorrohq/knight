@@ -16,7 +16,7 @@ DEFAULT_APP_CONFIG: list[dict[str, object]] = [
     {
         "key": "logging_format",
         "value": "json",
-        "description": "Log formatter type. Allowed values are text or json.",
+        "description": "Log formatter type. Allowed values: text, json.",
     },
     {
         "key": "logging_include_timestamp",
@@ -45,22 +45,22 @@ DEFAULT_APP_CONFIG: list[dict[str, object]] = [
     },
     {
         "key": "agent_provider",
-        "value": "",
-        "description": "Model provider used by the coding agent (e.g. openai, anthropic, google-genai).",
+        "value": "openai",
+        "description": "Model provider. Allowed values: openai, anthropic, google-genai.",
     },
     {
         "key": "agent_model_default",
-        "value": "",
-        "description": "Default model name. Used when no tier-specific model is configured.",
+        "value": "gpt-4o-mini",
+        "description": "Default model. Used when no tier-specific model is configured.",
     },
     {
         "key": "agent_model_high",
-        "value": "",
+        "value": "gpt-4o",
         "description": "High-tier model for coding tasks. Falls back to agent_model_default if unset.",
     },
     {
         "key": "agent_model_low",
-        "value": "",
+        "value": "gpt-4o-mini",
         "description": "Low-tier model for lightweight tasks (commit messages, changelogs). Falls back to agent_model_default if unset.",
     },
     {

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from knight.agents.config import settings
 from knight.utils.db.config_store import ConfigStore
 
+ALLOWED_PROVIDERS = {"openai", "anthropic", "google-genai"}
+
 
 @dataclass(slots=True)
 class ResolvedAgentSettings:
@@ -28,12 +30,18 @@ class AgentConfigResolver:
         self.store = ConfigStore()
 
     def resolve(self, *, repository: str | None = None) -> ResolvedAgentSettings:
+        provider = self.store.get_string(
+            key="agent_provider",
+            repository=repository,
+            default=settings.agent_provider,
+        )
+        if provider and provider not in ALLOWED_PROVIDERS:
+            raise ValueError(
+                f"agent_provider {provider!r} is not allowed. "
+                f"Must be one of: {', '.join(sorted(ALLOWED_PROVIDERS))}"
+            )
         return ResolvedAgentSettings(
-            provider=self.store.get_string(
-                key="agent_provider",
-                repository=repository,
-                default=settings.agent_provider,
-            ),
+            provider=provider,
             model_default=self.store.get_string(
                 key="agent_model_default",
                 repository=repository,
