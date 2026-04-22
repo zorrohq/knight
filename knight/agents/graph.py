@@ -62,14 +62,19 @@ def build_initial_state(
         repository_local_path=task.repository_local_path,
     ) or None
     runtime_config = AgentConfigResolver().resolve(repository=repository_identity)
-    provider_configured = bool(runtime_config.provider and runtime_config.model)
+    provider_configured = bool(
+        runtime_config.provider
+        and (runtime_config.model_high or runtime_config.model_default)
+    )
     return {
         "task": task,
         "sandbox": dict(sandbox or {}),
         "log_config": _serialize_log_config(log_config),
         "runtime_config": {
             "provider": runtime_config.provider,
-            "model": runtime_config.model,
+            "model_default": runtime_config.model_default,
+            "model_high": runtime_config.model_high,
+            "model_low": runtime_config.model_low,
             "temperature": runtime_config.temperature,
             "max_steps": runtime_config.max_steps,
             "command_timeout_seconds": runtime_config.command_timeout_seconds,
@@ -183,7 +188,7 @@ def inspect_workspace(state: AgentState) -> AgentState:
 
 def call_model(state: AgentState) -> AgentState:
     runtime_config = ResolvedAgentSettings(**state["runtime_config"])
-    model = create_agent_model(runtime_config)
+    model = create_agent_model(runtime_config, tier="high")
     if model is None:
         return {
             **state,

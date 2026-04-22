@@ -46,12 +46,22 @@ DEFAULT_APP_CONFIG: list[dict[str, object]] = [
     {
         "key": "agent_provider",
         "value": "",
-        "description": "Model provider used by the coding agent.",
+        "description": "Model provider used by the coding agent (e.g. openai, anthropic, google-genai).",
     },
     {
-        "key": "agent_model",
+        "key": "agent_model_default",
         "value": "",
-        "description": "Model name used by the coding agent.",
+        "description": "Default model name. Used when no tier-specific model is configured.",
+    },
+    {
+        "key": "agent_model_high",
+        "value": "",
+        "description": "High-tier model for coding tasks. Falls back to agent_model_default if unset.",
+    },
+    {
+        "key": "agent_model_low",
+        "value": "",
+        "description": "Low-tier model for lightweight tasks (commit messages, changelogs). Falls back to agent_model_default if unset.",
     },
     {
         "key": "agent_temperature",
@@ -60,7 +70,7 @@ DEFAULT_APP_CONFIG: list[dict[str, object]] = [
     },
     {
         "key": "agent_max_steps",
-        "value": 12,
+        "value": 25,
         "description": "Maximum number of model/tool iterations for the coding agent.",
     },
     {

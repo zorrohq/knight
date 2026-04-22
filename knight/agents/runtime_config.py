@@ -9,7 +9,9 @@ from knight.utils.db.config_store import ConfigStore
 @dataclass(slots=True)
 class ResolvedAgentSettings:
     provider: str
-    model: str
+    model_default: str
+    model_high: str
+    model_low: str
     temperature: float
     max_steps: int
     command_timeout_seconds: int
@@ -32,10 +34,20 @@ class AgentConfigResolver:
                 repository=repository,
                 default=settings.agent_provider,
             ),
-            model=self.store.get_string(
-                key="agent_model",
+            model_default=self.store.get_string(
+                key="agent_model_default",
                 repository=repository,
-                default=settings.agent_model,
+                default=settings.agent_model_default,
+            ),
+            model_high=self.store.get_string(
+                key="agent_model_high",
+                repository=repository,
+                default=settings.agent_model_high,
+            ),
+            model_low=self.store.get_string(
+                key="agent_model_low",
+                repository=repository,
+                default=settings.agent_model_low,
             ),
             temperature=self.store.get_float(
                 key="agent_temperature",
