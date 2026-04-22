@@ -1,20 +1,6 @@
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
-
-
-ToolName = Literal[
-    "list_files",
-    "read_file",
-    "write_file",
-    "replace_in_file",
-    "search_files",
-    "git_status",
-    "git_diff",
-    "run_command",
-    "http_request",
-    "fetch_url",
-]
 
 
 class AgentTaskRequest(BaseModel):

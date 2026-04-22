@@ -19,10 +19,6 @@ class ResolvedAgentSettings:
     command_timeout_seconds: int
     max_command_output_chars: int
     blocked_command_prefixes: list[str]
-    allow_run_command: bool
-    allow_write_files: bool
-    allow_commit_and_push: bool
-    system_prompt: str
 
 
 class AgentConfigResolver:
@@ -81,25 +77,5 @@ class AgentConfigResolver:
                 key="agent_blocked_command_prefixes",
                 repository=repository,
                 default=list(settings.agent_blocked_command_prefixes),
-            ),
-            allow_run_command=self.store.get_bool(
-                key="agent_allow_run_command",
-                repository=repository,
-                default=True,
-            ),
-            allow_write_files=self.store.get_bool(
-                key="agent_allow_write_files",
-                repository=repository,
-                default=True,
-            ),
-            allow_commit_and_push=self.store.get_bool(
-                key="agent_allow_commit_and_push",
-                repository=repository,
-                default=True,
-            ),
-            system_prompt=self.store.get_string(
-                key="agent_system_prompt",
-                repository=repository,
-                default=settings.agent_system_prompt,
             ),
         )
