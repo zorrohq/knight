@@ -13,12 +13,13 @@ from knight.runtime.authorship import (
     add_pr_collaboration_note,
     make_identity,
 )
-from knight.runtime.github import create_github_pr, get_github_default_branch
+from knight.runtime.github import create_github_pr, get_github_default_branch, post_issue_comment, post_pr_comment
 from knight.runtime.logging_config import get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
 from knight.utils.db.state_store import BranchStateStore
 from knight.worker.commit_message import CommitMessageService
+from knight.worker.pr_description import ChangelogService
 from knight.worker.config import settings
 
 logger = get_logger(__name__)
@@ -36,6 +37,7 @@ def _scrub_credentials(text: str) -> str:
 class WorkerGitOpsService:
     def __init__(self) -> None:
         self.commit_messages = CommitMessageService()
+        self.changelog = ChangelogService()
         self.provisioner = WorktreeProvisioner()
         self.state_store = BranchStateStore()
 
@@ -134,12 +136,14 @@ class WorkerGitOpsService:
                 github_token=github_token,
                 identity_name=identity.display_name if identity else "",
                 identity_email=identity.commit_email if identity else "",
+                diff_text=diff_text,
             )
 
         if task.cleanup_worktree:
             self.provisioner.remove_worktree(
                 repo_path=repo_path,
                 worktree_path=worktree_path,
+                branch_name=sandbox["branch_name"],
             )
             logger.info(
                 "worker worktree cleaned up",
@@ -181,6 +185,7 @@ class WorkerGitOpsService:
         github_token: str,
         identity_name: str,
         identity_email: str,
+        diff_text: str = "",
     ) -> str:
         if not github_token:
             return ""
@@ -193,7 +198,7 @@ class WorkerGitOpsService:
 
         repo_owner, repo_name = repository_identity.split("/", 1)
         title = f"feat: {task.task_type} for {task.issue_id}" if task.issue_id else f"feat: {task.task_type}"
-        body = task.instructions.strip() or "Automated changes by Knight."
+        body = self.changelog.for_pr_body(task=task, diff_text=diff_text)
 
         # Add collaboration note if we have user identity
         identity = (
@@ -213,7 +218,7 @@ class WorkerGitOpsService:
                 repo_name=repo_name,
                 github_token=github_token,
             )
-            pr_url, _pr_number, pr_existing = create_github_pr(
+            pr_url, pr_number, pr_existing = create_github_pr(
                 repo_owner=repo_owner,
                 repo_name=repo_name,
                 github_token=github_token,
@@ -234,6 +239,23 @@ class WorkerGitOpsService:
                         "pr_existing": pr_existing,
                     },
                 )
+                if pr_existing and pr_number and diff_text:
+                    update_comment = self.changelog.generate(task=task, diff_text=diff_text)
+                    post_pr_comment(
+                        repo_owner=repo_owner,
+                        repo_name=repo_name,
+                        pr_number=pr_number,
+                        github_token=github_token,
+                        body=update_comment,
+                    )
+                self._post_pr_notification(
+                    task=task,
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    github_token=github_token,
+                    pr_url=pr_url,
+                    pr_existing=pr_existing,
+                )
                 return pr_url
         except Exception:
             logger.exception(
@@ -241,6 +263,34 @@ class WorkerGitOpsService:
                 extra={"repository": repository_identity, "issue_id": task.issue_id},
             )
         return ""
+
+    def _post_pr_notification(
+        self,
+        *,
+        task: AgentTaskRequest,
+        repo_owner: str,
+        repo_name: str,
+        github_token: str,
+        pr_url: str,
+        pr_existing: bool = False,
+    ) -> None:
+        if not task.issue_id or "#" not in task.issue_id:
+            return
+        number = task.issue_id.split("#", 1)[-1]
+        if not number.isdigit():
+            return
+        mention = f"@{task.author_name}" if task.author_name else "Hey"
+        if pr_existing:
+            comment = f"Hey {mention}! I've pushed updates to the existing PR: {pr_url}"
+        else:
+            comment = f"Hey {mention}! I've opened a PR for your review: {pr_url}"
+        post_issue_comment(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            issue_number=int(number),
+            github_token=github_token,
+            body=comment,
+        )
 
     def _run(self, command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
         completed = subprocess.run(

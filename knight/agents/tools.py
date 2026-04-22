@@ -16,20 +16,8 @@ from pydantic import BaseModel, Field
 
 from knight.agents.models import AgentTaskRequest
 from knight.agents.runtime_config import ResolvedAgentSettings
-from knight.runtime.authorship import (
-    KNIGHT_BOT_EMAIL,
-    KNIGHT_BOT_NAME,
-    add_coauthor_trailer,
-    add_pr_collaboration_note,
-    make_identity,
-)
 from knight.runtime.command_runner import LocalCommandRunner
 from knight.runtime.filesystem import LocalWorkspace
-from knight.runtime.github import (
-    create_github_pr,
-    get_github_default_branch,
-)
-from knight.runtime.repository_identity import normalize_repository_identity
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +85,6 @@ class FetchUrlInput(BaseModel):
     url: str
     timeout: int = 30
 
-
-class CommitAndOpenPrInput(BaseModel):
-    title: str
-    body: str
-    commit_message: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -391,144 +374,6 @@ class AgentToolset:
         except _requests.exceptions.RequestException as exc:
             return {"error": f"fetch error: {exc}", "url": url}
 
-    # ------------------------------------------------------------------
-    # Commit and open PR tool
-    # ------------------------------------------------------------------
-
-    def commit_and_open_pr(
-        self,
-        title: str,
-        body: str,
-        commit_message: str | None = None,
-    ) -> dict[str, Any]:
-        """Commit all changes, push to the branch, and open a GitHub draft PR.
-
-        If a PR already exists for the branch it is updated rather than recreated.
-        Call this as the final step of any code-change task.
-        """
-        if not self.task or not self.sandbox:
-            return {
-                "success": False,
-                "error": "commit_and_open_pr is unavailable: sandbox context not provided",
-                "pr_url": None,
-            }
-
-        worktree_path = Path(self.sandbox.get("worktree_path", str(self.workspace.root)))
-        branch_name = self.sandbox.get("branch_name", "")
-        push_remote = (self.task.push_remote or "origin") if self.task else "origin"
-
-        # Check for uncommitted changes
-        status = self._git(["git", "status", "--porcelain"], cwd=worktree_path)
-        has_uncommitted = bool(status.stdout.strip())
-
-        # Check for unpushed commits. When the branch doesn't exist on the remote
-        # yet, the range ref fails (exit_code != 0) — treat that as "has unpushed"
-        # because the branch itself needs to be pushed for the first time.
-        unpushed = self._git(
-            ["git", "log", "--oneline", f"origin/{branch_name}..HEAD"],
-            cwd=worktree_path,
-            check=False,
-        )
-        has_unpushed = bool(unpushed.stdout.strip()) or unpushed.returncode != 0
-
-        if not has_uncommitted and not has_unpushed:
-            return {"success": False, "error": "no changes detected", "pr_url": None}
-
-        # Build commit message with attribution
-        final_commit_msg = commit_message or title
-        if self.task:
-            identity = make_identity(
-                name=self.task.author_name,
-                email=self.task.author_email,
-            )
-            final_commit_msg = add_coauthor_trailer(final_commit_msg, identity)
-            pr_body = add_pr_collaboration_note(body, identity)
-        else:
-            pr_body = body
-
-        if has_uncommitted:
-            self._git(
-                ["git", "config", "user.name", KNIGHT_BOT_NAME],
-                cwd=worktree_path,
-            )
-            self._git(
-                ["git", "config", "user.email", KNIGHT_BOT_EMAIL],
-                cwd=worktree_path,
-            )
-            self._git(["git", "add", "--all"], cwd=worktree_path)
-            commit_result = self._git(
-                ["git", "commit", "-m", final_commit_msg],
-                cwd=worktree_path,
-                check=False,
-            )
-            if commit_result.returncode != 0:
-                return {
-                    "success": False,
-                    "error": f"git commit failed: {commit_result.stderr.strip()}",
-                    "pr_url": None,
-                }
-
-        push_result = self._git(
-            ["git", "push", "--set-upstream", push_remote, branch_name],
-            cwd=worktree_path,
-            check=False,
-        )
-        if push_result.returncode != 0:
-            return {
-                "success": False,
-                "error": f"git push failed: {push_result.stderr.strip()}",
-                "pr_url": None,
-            }
-
-        github_token = (self.task.github_token if self.task else "") or ""
-        if not github_token:
-            logger.info("no github_token available; push succeeded but PR not created")
-            return {
-                "success": True,
-                "pr_url": None,
-                "pr_existing": False,
-                "note": "branch pushed; no github_token configured for PR creation",
-            }
-
-        repository = normalize_repository_identity(
-            repository_url=self.task.repository_url if self.task else "",
-            repository_local_path=self.task.repository_local_path if self.task else "",
-        )
-        if "/" not in repository:
-            return {
-                "success": False,
-                "error": f"could not determine repo owner/name from repository: {repository!r}",
-                "pr_url": None,
-            }
-        repo_owner, repo_name = repository.split("/", 1)
-
-        try:
-            base_branch = get_github_default_branch(
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                github_token=github_token,
-            )
-            pr_url, _pr_number, pr_existing = create_github_pr(
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                github_token=github_token,
-                title=title,
-                head_branch=branch_name,
-                base_branch=base_branch,
-                body=pr_body,
-            )
-        except Exception as exc:
-            logger.exception("GitHub PR creation failed")
-            return {
-                "success": False,
-                "error": f"GitHub API error: {exc}",
-                "pr_url": None,
-            }
-
-        if not pr_url:
-            return {"success": False, "error": "GitHub PR creation returned no URL", "pr_url": None}
-
-        return {"success": True, "pr_url": pr_url, "pr_existing": pr_existing, "error": None}
 
     def _git(
         self,
@@ -638,19 +483,6 @@ class AgentToolset:
                         "Run a shell command inside the workspace, subject to sandbox policy."
                     ),
                     args_schema=RunCommandInput,
-                )
-            )
-
-        if self.runtime_config.allow_commit_and_push and self.task and self.sandbox:
-            tools.append(
-                StructuredTool.from_function(
-                    func=self.commit_and_open_pr,
-                    name="commit_and_open_pr",
-                    description=(
-                        "Commit all changes, push to the branch, and open a GitHub draft PR. "
-                        "Call this as the FINAL step after verifying your implementation is correct."
-                    ),
-                    args_schema=CommitAndOpenPrInput,
                 )
             )
 

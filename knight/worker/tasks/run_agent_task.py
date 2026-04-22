@@ -3,6 +3,7 @@ from typing import Any
 
 from knight.agents.models import AgentTaskRequest
 from knight.agents.service import CodingAgentService
+from knight.runtime.github import react_to_comment
 from knight.runtime.logging_config import get_logger, setup_logging
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.worker.celery_app import celery_app
@@ -34,6 +35,18 @@ def run_agent_task(
             "task_type": task.task_type,
         },
     )
+    if task.trigger_comment_id and task.github_token and "/" in (task.issue_id or ""):
+        repo_owner, repo_name = normalize_repository_identity(
+            repository_url=task.repository_url,
+            repository_local_path=task.repository_local_path,
+        ).split("/", 1)
+        react_to_comment(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            comment_id=task.trigger_comment_id,
+            github_token=task.github_token,
+        )
+
     runtime = WorkerRuntimeService()
     prepared_task, sandbox = runtime.prepare_task(task)
     logger.info(
@@ -71,13 +84,15 @@ def run_agent_task(
         },
     )
 
+    task_dump = result.task.model_dump()
+    task_dump["github_token"] = "<redacted>"
     return {
         "task_id": self.request.id,
         "status": result.status,
         "provider_configured": result.provider_configured,
         "final_message": result.final_message,
         "iterations": result.iterations,
-        "task": result.task.model_dump(),
+        "task": task_dump,
         "available_tools": result.available_tools,
         "sandbox": result.sandbox,
         "workspace_summary": result.workspace_summary,

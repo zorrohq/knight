@@ -22,6 +22,7 @@ import hmac
 import logging
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from knight.api.config import settings
@@ -135,16 +136,21 @@ def _extract_task(
     if event == "issue_comment":
         if payload.get("action") != "created":
             return None
-        body = payload.get("comment", {}).get("body") or ""
-        if not _contains_trigger(body):
+        comment = payload.get("comment", {})
+        comment_body = comment.get("body") or ""
+        if not _contains_trigger(comment_body):
             return None
         issue = payload.get("issue", {})
         issue_number = issue.get("number")
+        issue_title: str = issue.get("title", "")
+        issue_body: str = issue.get("body") or ""
+        instructions = f"## {issue_title}\n\n{issue_body}\n\n---\n\n{comment_body}".strip()
         return {
             **base,
             "issue_id": f"{repo_full_name}#{issue_number}",
-            "instructions": body.strip(),
+            "instructions": instructions,
             "task_type": "issue_comment",
+            "trigger_comment_id": comment.get("id"),
         }
 
     if event == "pull_request_review_comment":

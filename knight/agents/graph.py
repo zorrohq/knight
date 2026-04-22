@@ -88,8 +88,8 @@ def build_initial_state(
         "status": "pending",
         "iterations": 0,
         "final_message": "",
-        "termination_warned": False,
-        "committed": False,
+        "termination_warnings": 0,
+        "files_written": False,
         "pr_url": "",
     }
 
@@ -203,7 +203,7 @@ def call_model(state: AgentState) -> AgentState:
             "issue_id": state["task"].issue_id,
             "branch_name": state["sandbox"].get("branch_name"),
             "iteration": state["iterations"] + 1,
-            "tool_call_count": len(response.tool_calls),
+            "tool_calls": [tc["name"] for tc in response.tool_calls],
         },
     )
 
@@ -225,8 +225,7 @@ def execute_tools(state: AgentState) -> AgentState:
 
     tool_messages: list[ToolMessage] = []
     step_results = list(state["steps"])
-    pr_url = state.get("pr_url", "")
-    committed = state.get("committed", False)
+    files_written = state.get("files_written", False)
 
     for tool_call in last_message.tool_calls:
         tool_name = tool_call["name"]
@@ -252,14 +251,10 @@ def execute_tools(state: AgentState) -> AgentState:
             output = tool.invoke(tool_call["args"])
             if tool_name == "run_command":
                 success = bool(output.get("exit_code", 0) == 0)
-            elif tool_name == "commit_and_open_pr":
-                success = bool(output.get("success"))
-                if success:
-                    committed = True
-                    if output.get("pr_url"):
-                        pr_url = output["pr_url"]
             else:
                 success = True
+            if tool_name in ("write_file", "replace_in_file") and success:
+                files_written = True
             step_result = ToolResult(
                 tool=tool_name,
                 success=success,
@@ -290,40 +285,44 @@ def execute_tools(state: AgentState) -> AgentState:
             )
 
         step_results.append(step_result)
-        if log_config.get("log_tool_results"):
-            extra = {
-                "repository": normalize_repository_identity(
-                    repository_url=state["task"].repository_url,
-                    repository_local_path=state["task"].repository_local_path,
-                ),
-                "issue_id": state["task"].issue_id,
-                "branch_name": state["sandbox"].get("branch_name"),
-                "tool": tool_name,
-                "success": step_result.success,
-            }
-            if tool_name == "run_command" and isinstance(step_result.output, dict):
+        extra: dict[str, object] = {
+            "repository": normalize_repository_identity(
+                repository_url=state["task"].repository_url,
+                repository_local_path=state["task"].repository_local_path,
+            ),
+            "issue_id": state["task"].issue_id,
+            "branch_name": state["sandbox"].get("branch_name"),
+            "tool": tool_name,
+            "success": step_result.success,
+        }
+        args = tool_call.get("args") or {}
+        if tool_name == "run_command":
+            extra["command"] = args.get("command", "")
+            if isinstance(step_result.output, dict):
                 extra["exit_code"] = step_result.output.get("exit_code")
                 if log_config.get("log_command_output"):
                     extra["stdout"] = step_result.output.get("stdout", "")
                     extra["stderr"] = step_result.output.get("stderr", "")
-            elif tool_name == "commit_and_open_pr" and isinstance(step_result.output, dict):
-                extra["pr_url"] = step_result.output.get("pr_url")
-                extra["pr_existing"] = step_result.output.get("pr_existing")
-            logger.info("agent tool executed", extra=extra)
+        elif tool_name in ("read_file", "write_file", "replace_in_file"):
+            extra["path"] = args.get("path", "")
+        elif tool_name == "list_files":
+            extra["path"] = args.get("path", "")
+            extra["recursive"] = args.get("recursive", False)
+        elif tool_name == "search_files":
+            extra["pattern"] = args.get("pattern", "")
+        elif tool_name == "fetch_url":
+            extra["url"] = args.get("url", "")
+        if not step_result.success and "error" not in extra:
+            extra["error"] = step_result.error
+        logger.info("agent tool executed", extra=extra)
 
     return {
         **state,
         "messages": tool_messages,
         "steps": step_results,
         "status": "running",
-        "committed": committed,
-        "pr_url": pr_url,
+        "files_written": files_written,
     }
-
-
-def _agent_called_commit(state: AgentState) -> bool:
-    """Return True if the agent successfully called commit_and_open_pr this run."""
-    return bool(state.get("committed"))
 
 
 def should_continue(state: AgentState) -> str:
@@ -339,15 +338,13 @@ def should_continue(state: AgentState) -> str:
     if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return "execute_tools"
 
-    # Premature-termination guard.
-    # If the agent wants to stop without having committed, and it hasn't been
-    # warned yet, inject a reminder and loop back once.
+    # Premature-termination guard: agent stopped without writing any files.
     if (
         isinstance(last_message, AIMessage)
         and not last_message.tool_calls
-        and not _agent_called_commit(state)
-        and not state.get("termination_warned")
-        and runtime_config.allow_commit_and_push
+        and not state.get("files_written", False)
+        and state.get("termination_warnings", 0) < 3
+        and runtime_config.allow_write_files
     ):
         return "warn_incomplete"
 
@@ -356,25 +353,32 @@ def should_continue(state: AgentState) -> str:
 
 def warn_incomplete(state: AgentState) -> AgentState:
     """Inject a warning when the agent stops without committing its work."""
-    warning = HumanMessage(
-        content=(
-            "You stopped without calling `commit_and_open_pr`. "
-            "If your implementation is complete, you MUST call `commit_and_open_pr` to push "
-            "your changes and open a PR. If there is nothing to commit, explain why and "
-            "call `commit_and_open_pr` to confirm the state of the repository."
+    warnings_so_far = state.get("termination_warnings", 0)
+    if warnings_so_far == 0:
+        content = (
+            "You stopped without making any file changes. "
+            "Do NOT describe what you plan to do — actually do it. "
+            "Use `write_file` or `replace_in_file` to make the code changes now."
         )
-    )
+    else:
+        content = (
+            f"WARNING (attempt {warnings_so_far + 1}/3): You are still describing instead of acting. "
+            "STOP. Use `write_file` or `replace_in_file` RIGHT NOW to write the actual code. "
+            "This is your final opportunity before the session ends."
+        )
+    warning = HumanMessage(content=content)
     logger.info(
         "premature termination guard triggered",
         extra={
             "issue_id": state["task"].issue_id,
             "iterations": state["iterations"],
+            "warning_number": warnings_so_far + 1,
         },
     )
     return {
         **state,
         "messages": [warning],
-        "termination_warned": True,
+        "termination_warnings": warnings_so_far + 1,
         "status": "running",
     }
 

@@ -44,7 +44,6 @@ def create_github_pr(
         "head": head_branch,
         "base": base_branch,
         "body": body,
-        "draft": True,
     }
     logger.info(
         "creating PR: repo=%s/%s head=%s base=%s",
@@ -120,6 +119,74 @@ def _find_existing_pr(
             pr = prs[0]
             return pr.get("html_url"), pr.get("number")
     return None, None
+
+
+def react_to_comment(
+    *,
+    repo_owner: str,
+    repo_name: str,
+    comment_id: int,
+    github_token: str,
+    reaction: str = "eyes",
+) -> bool:
+    """Add a reaction to an issue comment. Returns True on success."""
+    try:
+        response = requests.post(
+            f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}/issues/comments/{comment_id}/reactions",
+            headers=_auth_headers(github_token),
+            json={"content": reaction},
+            timeout=15,
+        )
+        return response.status_code in (_HTTP_CREATED, 200)
+    except requests.RequestException:
+        logger.exception("HTTP error reacting to GitHub comment")
+    return False
+
+
+def post_issue_comment(
+    *,
+    repo_owner: str,
+    repo_name: str,
+    issue_number: int,
+    github_token: str,
+    body: str,
+) -> bool:
+    """Post a comment on a GitHub issue. Returns True on success."""
+    try:
+        response = requests.post(
+            f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}/issues/{issue_number}/comments",
+            headers=_auth_headers(github_token),
+            json={"body": body},
+            timeout=30,
+        )
+        if response.status_code == _HTTP_CREATED:
+            return True
+        logger.warning(
+            "GitHub API error %s posting issue comment: %s",
+            response.status_code,
+            response.json().get("message"),
+        )
+    except requests.RequestException:
+        logger.exception("HTTP error posting GitHub issue comment")
+    return False
+
+
+def post_pr_comment(
+    *,
+    repo_owner: str,
+    repo_name: str,
+    pr_number: int,
+    github_token: str,
+    body: str,
+) -> bool:
+    """Post a comment on a GitHub pull request. Returns True on success."""
+    return post_issue_comment(
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        issue_number=pr_number,
+        github_token=github_token,
+        body=body,
+    )
 
 
 def get_github_default_branch(

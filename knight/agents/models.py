@@ -14,7 +14,6 @@ ToolName = Literal[
     "run_command",
     "http_request",
     "fetch_url",
-    "commit_and_open_pr",
 ]
 
 
@@ -34,6 +33,7 @@ class AgentTaskRequest(BaseModel):
     github_token: str = ""
     author_name: str = ""
     author_email: str = ""
+    trigger_comment_id: int | None = None
 
 
 class ToolResult(BaseModel):
