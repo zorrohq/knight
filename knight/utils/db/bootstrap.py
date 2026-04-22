@@ -116,6 +116,9 @@ DEFAULT_APP_CONFIG: list[dict[str, object]] = [
 def initialize_database(database_url: str) -> None:
     engine = create_database_engine(database_url)
     metadata.create_all(engine)
+    with engine.begin() as conn:
+        for table in reversed(metadata.sorted_tables):
+            conn.execute(table.delete())
     backend = create_store_backend(database_url)
     for item in DEFAULT_APP_CONFIG:
         backend.upsert_config_value(
