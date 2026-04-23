@@ -9,7 +9,7 @@
 - [x] 7. GitHub API calls have no retry — fixed in 9afd8b3
 - [x] 8. Webhook signature timing attack — already using hmac.compare_digest correctly
 - [x] 9. No Celery task timeout — fixed in c3b798b (soft 140min / hard 150min + acks_late)
-- [ ] 10. pi_provider_map.json only maps google-genai
+- [x] 10. pi_provider_map.json only maps google-genai — non-issue, .get(k, k) passthrough handles all unmapped providers
 - [x] 11. No DLQ for failed tasks — partially fixed (acks_late + reject_on_worker_lost in c3b798b)
 - [x] 12. Commit message and PR description use separate LLM calls — fixed, single generate_both() call
 - [x] 13. No rate limiting on webhook endpoint — fixed, X-GitHub-Delivery deduplication in 190d81c

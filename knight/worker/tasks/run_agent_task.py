@@ -8,7 +8,7 @@ from knight.agents.service import CodingAgentService
 from knight.runtime.github import post_issue_comment, react_to_comment
 from knight.runtime.logging_config import get_logger, setup_logging
 from knight.runtime.repository_identity import normalize_repository_identity
-from knight.worker.celery_app import celery_app
+from knight.worker.celery_app import _DLQ_QUEUE, celery_app
 from knight.worker.git_ops import WorkerGitOpsService
 from knight.worker.runtime import WorkerRuntimeService
 
@@ -45,6 +45,10 @@ def _post_error_comment(task: AgentTaskRequest, message: str) -> None:
     time_limit=9000,        # 150 min
     acks_late=True,
     reject_on_worker_lost=True,
+    # One retry for transient infra failures (DB down, clone error, etc.).
+    # SoftTimeLimitExceeded is excluded — no point consuming another slot.
+    max_retries=1,
+    default_retry_delay=90,
 )
 def run_agent_task(
     self, payload: Mapping[str, Any] | None = None
@@ -111,15 +115,29 @@ def run_agent_task(
         )
         raise
 
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "worker task failed with unhandled exception",
             extra={"task_id": self.request.id, "repository": repository_identity, "issue_id": task.issue_id},
         )
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+
+        # Retries exhausted — post error comment and route to DLQ.
         _post_error_comment(
             task,
             "I hit an unexpected error while working on this. "
             "Check the logs for details, or trigger me again to retry.",
+        )
+        from knight.worker.tasks.dlq_task import record_dlq_entry
+        record_dlq_entry.apply_async(
+            kwargs={
+                "original_task_id": self.request.id or "",
+                "payload": dict(payload or {}),
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+            queue=_DLQ_QUEUE,
         )
         raise
 
