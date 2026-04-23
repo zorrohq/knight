@@ -32,7 +32,6 @@ _GITHUB_HEADERS = {
 
 _HTTP_CREATED = 201
 _HTTP_OK = 200
-_HTTP_UNPROCESSABLE = 422
 
 
 def _auth_headers(token: str) -> dict[str, str]:
@@ -49,18 +48,23 @@ def create_github_pr(
     base_branch: str,
     body: str,
 ) -> tuple[str | None, int | None, bool]:
-    """Create a draft GitHub pull request, or return the URL of an existing one.
+    """Create a GitHub pull request, or return the URL of an existing one.
 
     Returns:
         (pr_url, pr_number, pr_existing) — pr_existing is True when an open PR
         for the head branch already existed and was returned instead of created.
     """
-    payload = {
-        "title": title,
-        "head": head_branch,
-        "base": base_branch,
-        "body": body,
-    }
+    # Check for an existing PR first to avoid a needless 422 round-trip.
+    existing = _find_existing_pr(
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        github_token=github_token,
+        head_branch=head_branch,
+    )
+    if existing[0]:
+        logger.info("existing PR found for branch %s: %s", head_branch, existing[0])
+        return existing[0], existing[1], True
+
     logger.info(
         "creating PR: repo=%s/%s head=%s base=%s",
         repo_owner,
@@ -72,7 +76,7 @@ def create_github_pr(
         response = _make_session().post(
             f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}/pulls",
             headers=_auth_headers(github_token),
-            json=payload,
+            json={"title": title, "head": head_branch, "base": base_branch, "body": body},
             timeout=30,
         )
         data = response.json()
@@ -82,21 +86,6 @@ def create_github_pr(
             pr_number = data.get("number")
             logger.info("PR created: %s", pr_url)
             return pr_url, pr_number, False
-
-        if response.status_code == _HTTP_UNPROCESSABLE:
-            # PR may already exist for this branch
-            logger.warning(
-                "GitHub API 422 creating PR (%s), searching for existing",
-                data.get("message"),
-            )
-            existing = _find_existing_pr(
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                github_token=github_token,
-                head_branch=head_branch,
-            )
-            if existing:
-                return existing[0], existing[1], True
 
         logger.error(
             "GitHub API error %s creating PR: %s",
