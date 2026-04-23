@@ -72,6 +72,7 @@ class WorkerGitOpsService:
 
         commit_message = ""
         commit_created = False
+        commit_sha = ""
         push_attempted = False
         push_completed = False
         pr_url = agent_pr_url
@@ -94,12 +95,18 @@ class WorkerGitOpsService:
             self._run(["git", "add", "--all"], cwd=worktree_path)
             self._run(["git", "commit", "-m", commit_message], cwd=worktree_path)
             commit_created = True
+            try:
+                sha_result = self._run(["git", "rev-parse", "--short", "HEAD"], cwd=worktree_path)
+                commit_sha = sha_result.stdout.strip()
+            except Exception:
+                commit_sha = ""
             logger.info(
                 "worker commit created",
                 extra={
                     "repository": repository_identity,
                     "issue_id": task.issue_id,
                     "branch_name": sandbox["branch_name"],
+                    "commit_sha": commit_sha,
                 },
             )
 
@@ -137,6 +144,7 @@ class WorkerGitOpsService:
                 identity_name=identity.display_name if identity else "",
                 identity_email=identity.commit_email if identity else "",
                 diff_text=diff_text,
+                commit_sha=commit_sha,
             )
 
         if task.cleanup_worktree:
@@ -186,6 +194,7 @@ class WorkerGitOpsService:
         identity_name: str,
         identity_email: str,
         diff_text: str = "",
+        commit_sha: str = "",
     ) -> str:
         if not github_token:
             return ""
@@ -255,6 +264,7 @@ class WorkerGitOpsService:
                     github_token=github_token,
                     pr_url=pr_url,
                     pr_existing=pr_existing,
+                    commit_sha=commit_sha,
                 )
                 return pr_url
         except Exception:
@@ -273,6 +283,7 @@ class WorkerGitOpsService:
         github_token: str,
         pr_url: str,
         pr_existing: bool = False,
+        commit_sha: str = "",
     ) -> None:
         if not task.issue_id or "#" not in task.issue_id:
             return
@@ -280,10 +291,11 @@ class WorkerGitOpsService:
         if not number.isdigit():
             return
         mention = f"@{task.author_name}" if task.author_name else "Hey"
+        sha_line = f"\n\n<!-- knight -->\nCommit: `{commit_sha}`" if commit_sha else ""
         if pr_existing:
-            comment = f"Hey {mention}! I've pushed updates to the existing PR: {pr_url}"
+            comment = f"Hey {mention}! I've pushed updates to the existing PR: {pr_url}{sha_line}"
         else:
-            comment = f"Hey {mention}! I've opened a PR for your review: {pr_url}"
+            comment = f"Hey {mention}! I've opened a PR for your review: {pr_url}{sha_line}"
         post_issue_comment(
             repo_owner=repo_owner,
             repo_name=repo_name,

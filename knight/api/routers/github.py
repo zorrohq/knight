@@ -144,11 +144,11 @@ def _extract_task(
         issue_number = issue.get("number")
         issue_title: str = issue.get("title", "")
         issue_body: str = issue.get("body") or ""
-        instructions = f"## {issue_title}\n\n{issue_body}\n\n---\n\n{comment_body}".strip()
         return {
             **base,
             "issue_id": f"{repo_full_name}#{issue_number}",
-            "instructions": instructions,
+            "issue_context": f"## {issue_title}\n\n{issue_body}".strip(),
+            "instructions": comment_body.strip(),
             "task_type": "issue_comment",
             "trigger_comment_id": comment.get("id"),
         }

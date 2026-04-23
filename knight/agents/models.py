@@ -16,6 +16,7 @@ class AgentTaskRequest(BaseModel):
     workspace_path: str = "."
     task_type: str = "repository_task"
     instructions: str = ""
+    issue_context: str = ""
     github_token: str = ""
     author_name: str = ""
     author_email: str = ""

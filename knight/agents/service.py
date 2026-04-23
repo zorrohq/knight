@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from knight.agents.models import AgentRunResult, AgentTaskRequest, ToolResult
 from knight.agents.runtime_config import AgentConfigResolver
 from knight.runtime.logging_config import ResolvedLoggingSettings, get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
+from knight.utils.db.session_store import AgentSessionStore
 
 logger = get_logger(__name__)
 
@@ -45,6 +47,7 @@ def _build_pi_prompt(
     sandbox: dict[str, Any],
     agents_md: str,
     repository: str,
+    is_continuation: bool = False,
 ) -> str:
     worktree_path = sandbox.get("worktree_path") or task.workspace_path or "."
     branch_name = sandbox.get("branch_name") or task.branch_name or "unknown"
@@ -54,6 +57,16 @@ def _build_pi_prompt(
         agents_md_section = f"## Repository Rules (AGENTS.md)\n\n{agents_md}"
     else:
         agents_md_section = "## Repository Rules\n\nNo AGENTS.md found. Apply general best practices."
+
+    continuation_note = (
+        "\n## Conversation Context\n\n"
+        "This is a continuation of an ongoing issue. Your full conversation history, "
+        "including previous changes and responses, is already in your session context. "
+        "Use `git log` and `git show <SHA>` to inspect commits mentioned in previous "
+        "responses before making further changes.\n"
+        if is_continuation
+        else ""
+    )
 
     return f"""## Working Environment
 
@@ -65,7 +78,7 @@ The repository has been cloned and your working branch has been checked out.
 - Repository: `{repository or "unknown"}`
 
 {agents_md_section}
-
+{continuation_note}
 ## Task Execution
 
 1. **Understand** — Read the task carefully. Explore relevant files before making any changes.
@@ -153,17 +166,39 @@ class PiAgentRunner:
             )
 
         agents_md = _read_agents_md(worktree_path)
+
+        # Session restore
+        session_store = AgentSessionStore()
+        existing_session = session_store.load(task.issue_id) if task.issue_id else None
+        is_continuation = existing_session is not None
+        session_dir = Path(tempfile.mkdtemp(prefix="knight-session-"))
+        if existing_session:
+            session_file_name, session_data = existing_session
+            (session_dir / session_file_name).write_text(session_data, encoding="utf-8")
+
+        # Build prompt — full context on first run, just the new message on continuation
+        if is_continuation:
+            user_message = task.instructions
+        elif task.issue_context:
+            user_message = f"{task.issue_context}\n\n---\n\n{task.instructions}".strip()
+        else:
+            user_message = task.instructions
+
         prompt = _build_pi_prompt(
             task=task,
             sandbox=sandbox,
             agents_md=agents_md,
             repository=repository,
+            is_continuation=is_continuation,
         )
+        # Prepend the user message to the system-level prompt context
+        full_prompt = f"{prompt}\n\n## User Message\n\n{user_message}"
 
         timeout_seconds = runtime_config.max_steps * runtime_config.command_timeout_seconds
         pi_model_id = f"{pi_provider}/{model}"
         cmd = [
-            pi_path, "--mode", "rpc", "--no-session",
+            pi_path, "--mode", "rpc",
+            "--session-dir", str(session_dir),
             "--provider", pi_provider,
             "--model", model,
         ]
@@ -177,6 +212,7 @@ class PiAgentRunner:
                 "model": pi_model_id,
                 "worktree_path": worktree_path,
                 "timeout_seconds": timeout_seconds,
+                "is_continuation": is_continuation,
             },
         )
 
@@ -210,7 +246,7 @@ class PiAgentRunner:
         # Keep stdin open — closing stdin causes pi to exit immediately
         proc.stdin.write(json.dumps({"type": "set_auto_compaction", "enabled": True}) + "\n")
         proc.stdin.write(json.dumps({"type": "set_thinking_level", "level": "medium"}) + "\n")
-        proc.stdin.write(json.dumps({"type": "prompt", "message": prompt}) + "\n")
+        proc.stdin.write(json.dumps({"type": "prompt", "message": full_prompt}) + "\n")
         proc.stdin.flush()
 
         # Read stdout line by line in a thread until agent_end or timeout
@@ -239,7 +275,25 @@ class PiAgentRunner:
         proc.wait()
         stderr_output = proc.stderr.read() if proc.stderr else ""
 
+        # Save session to DB, then clean up temp dir
+        try:
+            session_files = sorted(
+                session_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True
+            )
+            if session_files and task.issue_id:
+                sf = session_files[0]
+                session_store.save(task.issue_id, sf.name, sf.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning(
+                "pi session save failed",
+                extra={"repository": repository, "issue_id": task.issue_id},
+                exc_info=True,
+            )
+        finally:
+            shutil.rmtree(session_dir, ignore_errors=True)
+
         if timed_out:
+            shutil.rmtree(session_dir, ignore_errors=True)
             logger.warning(
                 "pi agent timed out",
                 extra={"repository": repository, "issue_id": task.issue_id},
