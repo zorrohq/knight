@@ -89,17 +89,19 @@ class SqlAlchemyStoreBackend:
             "updated_at": now,
         }
         with self.engine.begin() as conn:
-            sp = conn.begin_nested()
-            try:
-                conn.execute(
-                    insert(agent_branches_table).values(**update_values, created_at=now)
-                )
-                sp.commit()
-            except IntegrityError:
-                sp.rollback()
-                conn.execute(
-                    update(agent_branches_table).where(branch_filter).values(**update_values)
-                )
+            result = conn.execute(
+                update(agent_branches_table).where(branch_filter).values(**update_values)
+            )
+            if result.rowcount == 0:
+                try:
+                    conn.execute(
+                        insert(agent_branches_table).values(**update_values, created_at=now)
+                    )
+                except IntegrityError:
+                    # Lost a concurrent insert race — row was created by another writer.
+                    conn.execute(
+                        update(agent_branches_table).where(branch_filter).values(**update_values)
+                    )
             row = conn.execute(
                 select(agent_branches_table).where(branch_filter).limit(1)
             ).mappings().one()
@@ -183,30 +185,27 @@ class SqlAlchemyStoreBackend:
             "updated_at": now,
         }
         with self.engine.begin() as conn:
-            sp = conn.begin_nested()
-            try:
-                conn.execute(
-                    insert(app_config_table).values(**update_values, created_at=now)
-                )
-                sp.commit()
-            except IntegrityError:
-                sp.rollback()
-                # Preserve existing description when the caller passes None.
-                existing = conn.execute(
-                    select(app_config_table.c.description)
-                    .where(config_filter)
-                    .limit(1)
+            # Preserve existing description when the caller passes None.
+            existing_desc = None
+            if description is None:
+                row = conn.execute(
+                    select(app_config_table.c.description).where(config_filter).limit(1)
                 ).mappings().first()
-                resolved_description = (
-                    description
-                    if description is not None
-                    else (existing["description"] if existing else None)
-                )
-                conn.execute(
-                    update(app_config_table)
-                    .where(config_filter)
-                    .values(**update_values, description=resolved_description)
-                )
+                existing_desc = row["description"] if row else None
+            resolved_description = description if description is not None else existing_desc
+            result = conn.execute(
+                update(app_config_table)
+                .where(config_filter)
+                .values(**update_values, description=resolved_description)
+            )
+            if result.rowcount == 0:
+                try:
+                    conn.execute(
+                        insert(app_config_table).values(**update_values, created_at=now)
+                    )
+                except IntegrityError:
+                    # Lost a concurrent insert race — safe to ignore.
+                    pass
 
     def _serialize_row(self, row: Mapping[str, Any]) -> dict[str, object]:
         output: dict[str, object] = {}
