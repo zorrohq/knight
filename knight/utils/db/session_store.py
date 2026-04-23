@@ -12,6 +12,34 @@ from knight.worker.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Sessions larger than this are trimmed to the most recent lines before saving.
+# Pi's auto-compaction should keep sessions well under this, but it's a hard
+# safety net against unbounded DB growth.
+_MAX_SESSION_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+def _trim_session(data: str, max_bytes: int) -> str:
+    """Return the most recent JSONL lines of data that fit within max_bytes."""
+    if len(data.encode()) <= max_bytes:
+        return data
+    lines = data.splitlines(keepends=True)
+    kept: list[str] = []
+    size = 0
+    for line in reversed(lines):
+        line_bytes = len(line.encode())
+        if size + line_bytes > max_bytes:
+            break
+        kept.append(line)
+        size += line_bytes
+    result = "".join(reversed(kept))
+    logger.warning(
+        "session data exceeded %d MB, trimmed from %d to %d lines",
+        max_bytes // (1024 * 1024),
+        len(lines),
+        len(kept),
+    )
+    return result
+
 
 class AgentSessionStore:
     def __init__(self, database_url: str | None = None) -> None:
@@ -40,31 +68,32 @@ class AgentSessionStore:
         return None
 
     def save(self, issue_id: str, session_file_name: str, session_data: str) -> None:
-        """Upsert session data for this issue."""
+        """Upsert session data for this issue, trimming if it exceeds the size limit."""
+        session_data = _trim_session(session_data, _MAX_SESSION_BYTES)
         now = datetime.now(UTC)
         try:
             with self.engine.begin() as conn:
-                sp = conn.begin_nested()
-                try:
-                    conn.execute(
-                        insert(agent_sessions_table).values(
-                            issue_id=issue_id,
-                            session_file_name=session_file_name,
-                            session_data=session_data,
-                            updated_at=now,
-                        )
+                result = conn.execute(
+                    update(agent_sessions_table)
+                    .where(agent_sessions_table.c.issue_id == issue_id)
+                    .values(
+                        session_file_name=session_file_name,
+                        session_data=session_data,
+                        updated_at=now,
                     )
-                    sp.commit()
-                except IntegrityError:
-                    sp.rollback()
-                    conn.execute(
-                        update(agent_sessions_table)
-                        .where(agent_sessions_table.c.issue_id == issue_id)
-                        .values(
-                            session_file_name=session_file_name,
-                            session_data=session_data,
-                            updated_at=now,
+                )
+                if result.rowcount == 0:
+                    try:
+                        conn.execute(
+                            insert(agent_sessions_table).values(
+                                issue_id=issue_id,
+                                session_file_name=session_file_name,
+                                session_data=session_data,
+                                updated_at=now,
+                            )
                         )
-                    )
+                    except IntegrityError:
+                        # Lost a concurrent insert race — the other writer's row is fine.
+                        pass
         except Exception:
             logger.warning("failed to save session for %s", issue_id, exc_info=True)
