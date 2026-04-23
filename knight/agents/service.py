@@ -83,10 +83,10 @@ The repository has been cloned and your working branch has been checked out.
 {continuation_note}
 ## Task Execution
 
-1. **Understand** — Read the task carefully. Explore relevant files before making any changes.
-2. **Implement** — Make focused, minimal changes. Do not touch code outside the task scope.
-3. **Verify** — Run linters and tests related to changed files only. Do NOT run the full test suite.
-4. **Done** — Once your changes are written to disk, your job is complete. Committing, pushing, and opening the PR are handled automatically.
+1. **Understand** — Read the task carefully. Explore every relevant file before touching anything.
+2. **Implement** — Match the scope of your changes to what the task actually asks for. A redesign means a thorough redesign — not one tweaked value. A bug fix means a targeted fix. Do not make token changes when the task calls for comprehensive work, and do not over-engineer when the task is narrow.
+3. **Verify** — After making changes, re-read every file you modified and confirm the result is correct and complete. Run linters or tests if applicable. For HTML/CSS: re-read the full file, check that structure is intact, styles are not conflicting, and nothing is broken. If a command fails and you made changes to fix it, re-run it.
+4. **Done** — Once your changes are written to disk and verified, your job is complete. Committing, pushing, and opening the PR are handled automatically.
 
 Do NOT describe what you plan to do and then stop. Write the actual code.
 
@@ -99,7 +99,6 @@ Do NOT describe what you plan to do and then stop. Write the actual code.
 - Never add copyright headers unless explicitly requested.
 - Never add inline comments unless the logic is genuinely non-obvious.
 - Only install trusted, well-maintained packages. Update dependency files accordingly.
-- If a command fails and you make changes to fix it, re-run it to verify the fix.
 - Ignore unrelated bugs or broken tests — stay scoped to the task.
 """
 
@@ -175,10 +174,13 @@ class PiAgentRunner:
             (session_dir / session_file_name).write_text(session_data, encoding="utf-8")
 
         if is_continuation:
-            # Session has full context — send the new comment with a brief workspace reminder
+            # Session has full context — send the new comment with a workspace reminder and standards
             full_prompt = (
                 f"[Workspace: `{worktree_path}`, branch: `{sandbox.get('branch_name', '')}`]\n\n"
-                f"{task.instructions}"
+                f"{task.instructions}\n\n"
+                f"---\n\n"
+                f"Reminder: match the scope of changes to what is asked. "
+                f"After implementing, re-read every file you modified and verify the result is correct and complete."
             ).strip()
         else:
             # First run — send full working environment context + task
@@ -247,7 +249,14 @@ class PiAgentRunner:
         # Keep stdin open — closing stdin causes pi to exit immediately
         stdout_lines: list[str] = []
         proc.stdin.write(json.dumps({"type": "set_auto_compaction", "enabled": True}) + "\n")
-        proc.stdin.write(json.dumps({"type": "set_thinking_level", "level": "medium"}) + "\n")
+        proc.stdin.write(json.dumps({
+            "type": "follow_up",
+            "message": (
+                "Review your work before finishing: re-read every file you modified. "
+                "Check for syntax errors, broken structure, incomplete changes, and regressions. "
+                "Fix anything that is wrong or missing. Only stop when the task is fully done."
+            ),
+        }) + "\n")
         proc.stdin.flush()
 
         if is_continuation and existing_session:
