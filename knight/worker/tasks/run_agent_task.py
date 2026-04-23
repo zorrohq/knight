@@ -16,6 +16,13 @@ logger = get_logger(__name__)
 @celery_app.task(
     bind=True,
     name="knight.worker.tasks.run_agent_task",
+    # Hard safety net above pi's own timeout (25 steps * 300s = 7500s).
+    # soft_time_limit raises SoftTimeLimitExceeded for graceful cleanup;
+    # time_limit is the absolute kill, preventing zombie worker slots.
+    soft_time_limit=8400,  # 140 min
+    time_limit=9000,        # 150 min
+    acks_late=True,
+    reject_on_worker_lost=True,
 )
 def run_agent_task(
     self, payload: Mapping[str, Any] | None = None
