@@ -55,7 +55,7 @@ DEFAULT_APP_CONFIG: list[dict[str, object]] = [
     },
     {
         "key": "agent_model_high",
-        "value": "gpt-4o",
+        "value": "gpt-5.3-codex",
         "description": "High-tier model for coding tasks. Falls back to agent_model_default if unset.",
     },
     {
