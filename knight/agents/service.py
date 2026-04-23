@@ -247,17 +247,34 @@ class PiAgentRunner:
 
         # Configure session then send prompt
         # Keep stdin open — closing stdin causes pi to exit immediately
+        stdout_lines: list[str] = []
         proc.stdin.write(json.dumps({"type": "set_auto_compaction", "enabled": True}) + "\n")
         proc.stdin.write(json.dumps({"type": "set_thinking_level", "level": "medium"}) + "\n")
+        proc.stdin.flush()
+
         if is_continuation and existing_session:
-            # Load the restored session file — pi starts fresh by default even with --session-dir
+            # Load the restored session file — pi starts fresh by default even with --session-dir.
+            # switch_session does async file I/O internally; if we send the prompt immediately after,
+            # pi accepts the prompt for the OLD session before switch_session completes, then the
+            # session swap discards the queued prompt. Wait for the switch_session response first.
             session_file_path = str(session_dir / existing_session[0])
             proc.stdin.write(json.dumps({"type": "switch_session", "sessionPath": session_file_path}) + "\n")
+            proc.stdin.flush()
+            assert proc.stdout is not None
+            for _line in proc.stdout:
+                stdout_lines.append(_line)
+                try:
+                    _ev = json.loads(_line.strip())
+                    if _ev.get("type") == "response" and _ev.get("command") == "switch_session":
+                        break
+                except json.JSONDecodeError:
+                    pass
+
         proc.stdin.write(json.dumps({"type": "prompt", "message": full_prompt}) + "\n")
         proc.stdin.flush()
 
         # Read stdout line by line in a thread until agent_end or timeout
-        stdout_lines: list[str] = []
+        # (stdout_lines may already have switch_session response lines from above)
         timed_out = False
 
         def _read_stdout() -> None:
@@ -265,8 +282,28 @@ class PiAgentRunner:
             for line in proc.stdout:
                 stdout_lines.append(line)
                 try:
-                    if json.loads(line.strip()).get("type") == "agent_end":
+                    event = json.loads(line.strip())
+                    event_type = event.get("type")
+                    if event_type == "agent_end":
                         break
+                    elif event_type == "extension_ui_request":
+                        # Pi is blocking on a confirmation dialog — auto-respond so it can proceed
+                        req_id = event.get("id", "")
+                        method = event.get("method", "")
+                        if method == "confirm":
+                            reply: dict[str, Any] = {"type": "extension_ui_response", "id": req_id, "confirmed": True}
+                        elif method in ("select", "input", "editor"):
+                            options = event.get("options") or []
+                            reply = {"type": "extension_ui_response", "id": req_id, "value": options[0] if options else ""}
+                        else:
+                            reply = {}
+                        if reply and proc.stdin and not proc.stdin.closed:
+                            proc.stdin.write(json.dumps(reply) + "\n")
+                            proc.stdin.flush()
+                            logger.debug(
+                                "pi: auto-responded to extension_ui_request",
+                                extra={"method": method, "req_id": req_id},
+                            )
                 except json.JSONDecodeError:
                     pass
 
