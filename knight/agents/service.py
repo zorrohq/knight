@@ -9,7 +9,6 @@ Knight handles: workspace prep, post-workflow (commit/push/PR/notify).
 from __future__ import annotations
 
 import json
-import select
 import shutil
 import subprocess
 import tempfile
@@ -245,9 +244,9 @@ class PiAgentRunner:
                 pr_url="",
             )
 
-        # Configure session then send prompt
-        # Keep stdin open — closing stdin causes pi to exit immediately
+        # Send setup commands. Keep stdin open — closing it causes pi to exit immediately.
         stdout_lines: list[str] = []
+        assert proc.stdin is not None
         proc.stdin.write(json.dumps({"type": "set_auto_compaction", "enabled": True}) + "\n")
         proc.stdin.write(json.dumps({"type": "set_auto_retry", "enabled": True}) + "\n")
         proc.stdin.write(json.dumps({
@@ -258,52 +257,52 @@ class PiAgentRunner:
                 "Fix anything that is wrong or missing. Only stop when the task is fully done."
             ),
         }) + "\n")
-        proc.stdin.flush()
 
         if is_continuation and existing_session:
-            # Load the restored session file — pi starts fresh by default even with --session-dir.
-            # switch_session does async file I/O internally; if we send the prompt immediately after,
-            # pi accepts the prompt for the OLD session before switch_session completes, then the
-            # session swap discards the queued prompt. Wait for the switch_session response first.
+            # switch_session does async file I/O internally — if we send the prompt immediately,
+            # pi accepts it for the OLD session before the swap completes and then discards it.
+            # Solution: send switch_session now, then let the reader thread wait for the response
+            # before sending the prompt. This keeps all stdout reads in one thread (no select/
+            # TextIOWrapper buffering races).
             session_file_path = str(session_dir / existing_session[0])
             proc.stdin.write(json.dumps({"type": "switch_session", "sessionPath": session_file_path}) + "\n")
             proc.stdin.flush()
-            assert proc.stdout is not None
-            _switch_deadline = time.monotonic() + 30
-            while time.monotonic() < _switch_deadline:
-                _ready, _, _ = select.select([proc.stdout], [], [], 1.0)
-                if not _ready:
-                    continue
-                _line = proc.stdout.readline()
-                if not _line:
-                    break
-                stdout_lines.append(_line)
-                try:
-                    _ev = json.loads(_line.strip())
-                    if _ev.get("type") == "response" and _ev.get("command") == "switch_session":
-                        break
-                except json.JSONDecodeError:
-                    pass
-            else:
-                logger.warning(
-                    "pi switch_session timed out; proceeding without session restore",
-                    extra={"repository": repository, "issue_id": task.issue_id},
-                )
+        else:
+            proc.stdin.write(json.dumps({"type": "prompt", "message": full_prompt}) + "\n")
+            proc.stdin.flush()
 
-        proc.stdin.write(json.dumps({"type": "prompt", "message": full_prompt}) + "\n")
-        proc.stdin.flush()
-
-        # Read stdout line by line in a thread until agent_end or timeout
-        # (stdout_lines may already have switch_session response lines from above)
+        # Read stdout in a dedicated thread — sole consumer, no select() needed.
         timed_out = False
+        _needs_switch = is_continuation and bool(existing_session)
+        _switch_deadline = time.monotonic() + 30
 
         def _read_stdout() -> None:
             assert proc.stdout is not None
+            _waiting_for_switch = _needs_switch
             for line in proc.stdout:
                 stdout_lines.append(line)
                 try:
                     event = json.loads(line.strip())
                     event_type = event.get("type")
+
+                    if _waiting_for_switch:
+                        # Drain output until we see the switch_session response, then send the prompt.
+                        if event.get("type") == "response" and event.get("command") == "switch_session":
+                            _waiting_for_switch = False
+                            if proc.stdin and not proc.stdin.closed:
+                                proc.stdin.write(json.dumps({"type": "prompt", "message": full_prompt}) + "\n")
+                                proc.stdin.flush()
+                        elif time.monotonic() > _switch_deadline:
+                            logger.warning(
+                                "pi switch_session timed out; sending prompt anyway",
+                                extra={"repository": repository, "issue_id": task.issue_id},
+                            )
+                            _waiting_for_switch = False
+                            if proc.stdin and not proc.stdin.closed:
+                                proc.stdin.write(json.dumps({"type": "prompt", "message": full_prompt}) + "\n")
+                                proc.stdin.flush()
+                        continue
+
                     if event_type == "agent_end":
                         break
                     elif event_type == "extension_ui_request":
