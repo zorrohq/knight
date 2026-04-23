@@ -1,20 +1,20 @@
 ## Status
 
-- [ ] 1. select() fragile with text=True pipes
+- [x] 1. select() fragile with text=True pipes — fixed, reader thread handles all stdout
 - [x] 2. agent_end final_message extraction dead code — fixed in 5af333c
-- [ ] 3. Session data grows unbounded in DB
+- [x] 3. Session data grows unbounded in DB — fixed, 5MB cap with JSONL line trimming
 - [x] 4. No set_auto_retry — fixed in 5af333c
-- [ ] 5. Upsert race condition in session_store / config_store
+- [x] 5. Upsert race condition in session_store / config_store — fixed, UPDATE-first pattern
 - [ ] 6. langchain heavy dependency — kept intentionally
 - [x] 7. GitHub API calls have no retry — fixed in 9afd8b3
 - [x] 8. Webhook signature timing attack — already using hmac.compare_digest correctly
 - [x] 9. No Celery task timeout — fixed in c3b798b (soft 140min / hard 150min + acks_late)
 - [ ] 10. pi_provider_map.json only maps google-genai
 - [x] 11. No DLQ for failed tasks — partially fixed (acks_late + reject_on_worker_lost in c3b798b)
-- [ ] 12. Commit message and PR description use separate LLM calls
-- [ ] 13. No rate limiting on webhook endpoint
+- [x] 12. Commit message and PR description use separate LLM calls — fixed, single generate_both() call
+- [x] 13. No rate limiting on webhook endpoint — fixed, X-GitHub-Delivery deduplication in 190d81c
 - [x] 14. experimental/ and references/ in Docker image — fixed in 316a590
-- [ ] 15. Worktree cleanup is best-effort
+- [x] 15. Worktree cleanup is best-effort — fixed, worker_ready startup sweep for stale worktrees
 - [x] 16. No error reporting back to GitHub — fixed in bfc132e
 
 ---
