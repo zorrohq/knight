@@ -1,7 +1,17 @@
-from celery import Celery
+import shutil
+import time
+from pathlib import Path
 
-from knight.runtime.logging_config import setup_logging
+from celery import Celery
+from celery.signals import worker_ready
+
+from knight.runtime.logging_config import get_logger, setup_logging
 from knight.worker.config import settings
+
+logger = get_logger(__name__)
+
+# Worktrees untouched for longer than this are considered orphaned.
+_STALE_WORKTREE_AGE_SECONDS = 60 * 60 * 4  # 4 hours
 
 
 def create_celery_app() -> Celery:
@@ -22,6 +32,29 @@ def create_celery_app() -> Celery:
         task_track_started=True,
     )
     return app
+
+
+@worker_ready.connect
+def _cleanup_stale_worktrees(sender: object, **kwargs: object) -> None:
+    """Remove worktree directories that were left behind by crashed tasks."""
+    sandboxes_root = Path(settings.worker_sandbox_root)
+    if not sandboxes_root.is_dir():
+        return
+    cutoff = time.time() - _STALE_WORKTREE_AGE_SECONDS
+    removed = 0
+    for worktrees_dir in sandboxes_root.glob("*/worktrees"):
+        for candidate in worktrees_dir.iterdir():
+            if not candidate.is_dir():
+                continue
+            try:
+                if candidate.stat().st_mtime < cutoff:
+                    shutil.rmtree(candidate, ignore_errors=True)
+                    removed += 1
+                    logger.info("cleaned up stale worktree: %s", candidate)
+            except OSError:
+                pass
+    if removed:
+        logger.info("startup cleanup: removed %d stale worktree(s)", removed)
 
 
 celery_app = create_celery_app()
