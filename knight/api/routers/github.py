@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -34,6 +35,23 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/github", tags=["GitHub"])
 
 _SUPPORTED_EVENTS = {"issues", "issue_comment", "pull_request_review_comment"}
+
+# Delivery IDs seen within the last hour — prevents double-processing GitHub retries.
+_seen_deliveries: dict[str, float] = {}
+_DELIVERY_TTL = 3600  # seconds
+
+
+def _is_duplicate_delivery(delivery_id: str) -> bool:
+    """Return True if this delivery was already processed. Registers it if new."""
+    now = time.time()
+    # Prune expired entries
+    expired = [k for k, t in _seen_deliveries.items() if now - t > _DELIVERY_TTL]
+    for k in expired:
+        del _seen_deliveries[k]
+    if delivery_id in _seen_deliveries:
+        return True
+    _seen_deliveries[delivery_id] = now
+    return False
 
 
 def _verify_signature(body: bytes, signature_header: str | None) -> None:
@@ -181,9 +199,14 @@ async def github_webhook(
     request: Request,
     x_hub_signature_256: str | None = Header(default=None),
     x_github_event: str | None = Header(default=None),
+    x_github_delivery: str | None = Header(default=None),
 ) -> dict[str, str]:
     body = await request.body()
     _verify_signature(body, x_hub_signature_256)
+
+    if x_github_delivery and _is_duplicate_delivery(x_github_delivery):
+        logger.info("ignoring duplicate github delivery: %s", x_github_delivery)
+        return {"status": "duplicate", "delivery_id": x_github_delivery}
 
     event = (x_github_event or "").lower()
     if event not in _SUPPORTED_EVENTS:
