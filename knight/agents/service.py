@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,9 @@ logger = get_logger(__name__)
 
 _PI_BINARY = "pi"
 _AGENTS_MD_FILENAME = "AGENTS.md"
+_PI_PROVIDER_MAP: dict[str, str] = json.loads(
+    (Path(__file__).parent.parent / "data" / "pi_provider_map.json").read_text()
+)
 
 
 def _read_agents_md(worktree_path: str) -> str:
@@ -89,10 +93,11 @@ Do NOT describe what you plan to do and then stop. Write the actual code.
 """
 
 
-def _map_status(agent_end_event: dict[str, Any], returncode: int) -> str:
-    if returncode != 0:
-        return "error"
+def _map_status(agent_end_event: dict[str, Any]) -> str:
+    # returncode is always -9 (SIGKILL) since we kill after agent_end — ignore it
     reason = (agent_end_event.get("reason") or agent_end_event.get("status") or "").lower()
+    if not agent_end_event:
+        return "error"
     if "max" in reason:
         return "max_iterations_reached"
     if "error" in reason:
@@ -116,7 +121,8 @@ class PiAgentRunner:
 
         runtime_config = AgentConfigResolver().resolve(repository=repository or None)
         model = runtime_config.model_high or runtime_config.model_default
-        provider_configured = bool(model)
+        pi_provider = _PI_PROVIDER_MAP.get(runtime_config.provider, runtime_config.provider) if runtime_config.provider else ""
+        provider_configured = bool(pi_provider and model)
 
         if not provider_configured:
             return AgentRunResult(
@@ -155,7 +161,12 @@ class PiAgentRunner:
         )
 
         timeout_seconds = runtime_config.max_steps * runtime_config.command_timeout_seconds
-        cmd = [pi_path, "--mode", "rpc", "--no-session"]
+        pi_model_id = f"{pi_provider}/{model}"
+        cmd = [
+            pi_path, "--mode", "rpc", "--no-session",
+            "--provider", pi_provider,
+            "--model", model,
+        ]
 
         logger.info(
             "pi agent starting",
@@ -163,16 +174,11 @@ class PiAgentRunner:
                 "repository": repository,
                 "issue_id": task.issue_id,
                 "branch_name": sandbox.get("branch_name"),
-                "model": model,
+                "model": pi_model_id,
                 "worktree_path": worktree_path,
                 "timeout_seconds": timeout_seconds,
             },
         )
-
-        stdin_payload = (
-            json.dumps({"type": "set_model", "model": model}) + "\n"
-            + json.dumps({"type": "prompt", "message": prompt}) + "\n"
-        ).encode()
 
         try:
             proc = subprocess.Popen(
@@ -181,34 +187,11 @@ class PiAgentRunner:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                text=True,
             )
-            try:
-                stdout_bytes, stderr_bytes = proc.communicate(
-                    input=stdin_payload,
-                    timeout=timeout_seconds,
-                )
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout_bytes, stderr_bytes = proc.communicate()
-                logger.warning(
-                    "pi agent timed out",
-                    extra={"repository": repository, "issue_id": task.issue_id},
-                )
-                return AgentRunResult(
-                    status="max_iterations_reached",
-                    provider_configured=provider_configured,
-                    task=task,
-                    available_tools=["read", "write", "edit", "bash"],
-                    sandbox=sandbox,
-                    workspace_summary={"root": worktree_path, "agents_md": agents_md},
-                    steps=[],
-                    final_message="Agent run timed out.",
-                    iterations=0,
-                    pr_url="",
-                )
         except Exception as exc:
             logger.exception(
-                "pi agent subprocess failed",
+                "pi agent subprocess failed to start",
                 extra={"repository": repository, "issue_id": task.issue_id},
             )
             return AgentRunResult(
@@ -223,13 +206,64 @@ class PiAgentRunner:
                 pr_url="",
             )
 
-        if proc.returncode != 0 and stderr_bytes:
+        # Configure session then send prompt
+        # Keep stdin open — closing stdin causes pi to exit immediately
+        proc.stdin.write(json.dumps({"type": "set_auto_compaction", "enabled": True}) + "\n")
+        proc.stdin.write(json.dumps({"type": "set_thinking_level", "level": "medium"}) + "\n")
+        proc.stdin.write(json.dumps({"type": "prompt", "message": prompt}) + "\n")
+        proc.stdin.flush()
+
+        # Read stdout line by line in a thread until agent_end or timeout
+        stdout_lines: list[str] = []
+        timed_out = False
+
+        def _read_stdout() -> None:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                stdout_lines.append(line)
+                try:
+                    if json.loads(line.strip()).get("type") == "agent_end":
+                        break
+                except json.JSONDecodeError:
+                    pass
+
+        reader = threading.Thread(target=_read_stdout, daemon=True)
+        reader.start()
+        reader.join(timeout=timeout_seconds)
+
+        if reader.is_alive():
+            timed_out = True
+
+        proc.stdin.close()
+        proc.kill()
+        proc.wait()
+        stderr_output = proc.stderr.read() if proc.stderr else ""
+
+        if timed_out:
+            logger.warning(
+                "pi agent timed out",
+                extra={"repository": repository, "issue_id": task.issue_id},
+            )
+            return AgentRunResult(
+                status="max_iterations_reached",
+                provider_configured=provider_configured,
+                task=task,
+                available_tools=["read", "write", "edit", "bash"],
+                sandbox=sandbox,
+                workspace_summary={"root": worktree_path, "agents_md": agents_md},
+                steps=[],
+                final_message="Agent run timed out.",
+                iterations=0,
+                pr_url="",
+            )
+
+        if proc.returncode not in (0, -9) and stderr_output:
             logger.warning(
                 "pi agent stderr",
                 extra={
                     "repository": repository,
                     "issue_id": task.issue_id,
-                    "stderr": stderr_bytes.decode(errors="replace")[:2000],
+                    "stderr": stderr_output[:2000],
                 },
             )
 
@@ -240,14 +274,14 @@ class PiAgentRunner:
         pending_tool: dict[str, str] = {}  # call_id → tool_name
         iterations = 0
 
-        for raw_line in stdout_bytes.splitlines():
+        for raw_line in stdout_lines:
             line = raw_line.strip()
             if not line:
                 continue
             try:
                 event: dict[str, Any] = json.loads(line)
             except json.JSONDecodeError:
-                logger.debug("pi: unparseable stdout line: %s", line[:200])
+                logger.debug("pi: unparseable stdout line: %s", line[:200], extra={"repository": repository})
                 continue
 
             event_type = event.get("type", "")
@@ -301,7 +335,7 @@ class PiAgentRunner:
                     extra={"event": event},
                 )
 
-        status = _map_status(agent_end_event, proc.returncode)
+        status = _map_status(agent_end_event)
 
         logger.info(
             "pi agent completed",
