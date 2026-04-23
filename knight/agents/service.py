@@ -9,10 +9,12 @@ Knight handles: workspace prep, post-workflow (commit/push/PR/notify).
 from __future__ import annotations
 
 import json
+import select
 import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -99,18 +101,14 @@ Do NOT describe what you plan to do and then stop. Write the actual code.
 - Only install trusted, well-maintained packages. Update dependency files accordingly.
 - If a command fails and you make changes to fix it, re-run it to verify the fix.
 - Ignore unrelated bugs or broken tests — stay scoped to the task.
-
-## Task
-
-{task.instructions}
 """
 
 
 def _map_status(agent_end_event: dict[str, Any]) -> str:
     # returncode is always -9 (SIGKILL) since we kill after agent_end — ignore it
-    reason = (agent_end_event.get("reason") or agent_end_event.get("status") or "").lower()
     if not agent_end_event:
         return "error"
+    reason = (agent_end_event.get("reason") or agent_end_event.get("status") or "").lower()
     if "max" in reason:
         return "max_iterations_reached"
     if "error" in reason:
@@ -261,7 +259,14 @@ class PiAgentRunner:
             proc.stdin.write(json.dumps({"type": "switch_session", "sessionPath": session_file_path}) + "\n")
             proc.stdin.flush()
             assert proc.stdout is not None
-            for _line in proc.stdout:
+            _switch_deadline = time.monotonic() + 30
+            while time.monotonic() < _switch_deadline:
+                _ready, _, _ = select.select([proc.stdout], [], [], 1.0)
+                if not _ready:
+                    continue
+                _line = proc.stdout.readline()
+                if not _line:
+                    break
                 stdout_lines.append(_line)
                 try:
                     _ev = json.loads(_line.strip())
@@ -269,6 +274,11 @@ class PiAgentRunner:
                         break
                 except json.JSONDecodeError:
                     pass
+            else:
+                logger.warning(
+                    "pi switch_session timed out; proceeding without session restore",
+                    extra={"repository": repository, "issue_id": task.issue_id},
+                )
 
         proc.stdin.write(json.dumps({"type": "prompt", "message": full_prompt}) + "\n")
         proc.stdin.flush()
@@ -337,7 +347,6 @@ class PiAgentRunner:
             shutil.rmtree(session_dir, ignore_errors=True)
 
         if timed_out:
-            shutil.rmtree(session_dir, ignore_errors=True)
             logger.warning(
                 "pi agent timed out",
                 extra={"repository": repository, "issue_id": task.issue_id},
@@ -385,20 +394,23 @@ class PiAgentRunner:
             event_type = event.get("type", "")
 
             if event_type == "tool_execution_start":
-                call_id = event.get("id") or event.get("call_id", "")
-                tool_name = event.get("tool") or event.get("name", "unknown")
+                call_id = event.get("toolCallId", "")
+                tool_name = event.get("toolName", "unknown")
                 if call_id:
                     pending_tool[call_id] = tool_name
 
             elif event_type == "tool_execution_end":
                 iterations += 1
-                call_id = event.get("id") or event.get("call_id", "")
-                tool_name = pending_tool.pop(call_id, event.get("tool") or event.get("name", "unknown"))
-                error = event.get("error") or None
+                call_id = event.get("toolCallId", "")
+                tool_name = pending_tool.pop(call_id, event.get("toolName", "unknown"))
+                is_err = bool(event.get("isError"))
+                content_list = (event.get("result") or {}).get("content") or []
+                result_text = content_list[0].get("text", "") if content_list else ""
+                error = result_text if is_err else None
                 step = ToolResult(
                     tool=tool_name,
-                    success=not bool(error),
-                    output={"result": event.get("result") or event.get("output", "")},
+                    success=not is_err,
+                    output={"result": result_text},
                     error=error,
                 )
                 steps.append(step)
@@ -413,10 +425,13 @@ class PiAgentRunner:
                     },
                 )
 
-            elif event_type == "message_update":
-                content = event.get("content") or event.get("text") or event.get("delta") or ""
-                if content:
-                    final_message = content
+            elif event_type == "message_end":
+                msg = event.get("message") or {}
+                if msg.get("role") == "assistant":
+                    for block in (msg.get("content") or []):
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            final_message = block.get("text", "")
+                            break
 
             elif event_type == "agent_end":
                 agent_end_event = event
