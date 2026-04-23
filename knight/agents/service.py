@@ -249,6 +249,7 @@ class PiAgentRunner:
         # Keep stdin open — closing stdin causes pi to exit immediately
         stdout_lines: list[str] = []
         proc.stdin.write(json.dumps({"type": "set_auto_compaction", "enabled": True}) + "\n")
+        proc.stdin.write(json.dumps({"type": "set_auto_retry", "enabled": True}) + "\n")
         proc.stdin.write(json.dumps({
             "type": "follow_up",
             "message": (
@@ -444,11 +445,6 @@ class PiAgentRunner:
 
             elif event_type == "agent_end":
                 agent_end_event = event
-                final_message = (
-                    event.get("message")
-                    or event.get("final_message")
-                    or final_message
-                )
 
             else:
                 logger.debug(
