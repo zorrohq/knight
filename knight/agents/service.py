@@ -176,23 +176,26 @@ class PiAgentRunner:
             session_file_name, session_data = existing_session
             (session_dir / session_file_name).write_text(session_data, encoding="utf-8")
 
-        # Build prompt — full context on first run, just the new message on continuation
         if is_continuation:
-            user_message = task.instructions
-        elif task.issue_context:
-            user_message = f"{task.issue_context}\n\n---\n\n{task.instructions}".strip()
+            # Session has full context — send the new comment with a brief workspace reminder
+            full_prompt = (
+                f"[Workspace: `{worktree_path}`, branch: `{sandbox.get('branch_name', '')}`]\n\n"
+                f"{task.instructions}"
+            ).strip()
         else:
-            user_message = task.instructions
-
-        prompt = _build_pi_prompt(
-            task=task,
-            sandbox=sandbox,
-            agents_md=agents_md,
-            repository=repository,
-            is_continuation=is_continuation,
-        )
-        # Prepend the user message to the system-level prompt context
-        full_prompt = f"{prompt}\n\n## User Message\n\n{user_message}"
+            # First run — send full working environment context + task
+            system_prompt = _build_pi_prompt(
+                task=task,
+                sandbox=sandbox,
+                agents_md=agents_md,
+                repository=repository,
+                is_continuation=False,
+            )
+            if task.issue_context:
+                first_message = f"{task.issue_context}\n\n---\n\n{task.instructions}".strip()
+            else:
+                first_message = task.instructions
+            full_prompt = f"{system_prompt}\n\n## Task\n\n{first_message}"
 
         timeout_seconds = runtime_config.max_steps * runtime_config.command_timeout_seconds
         pi_model_id = f"{pi_provider}/{model}"
@@ -246,6 +249,10 @@ class PiAgentRunner:
         # Keep stdin open — closing stdin causes pi to exit immediately
         proc.stdin.write(json.dumps({"type": "set_auto_compaction", "enabled": True}) + "\n")
         proc.stdin.write(json.dumps({"type": "set_thinking_level", "level": "medium"}) + "\n")
+        if is_continuation and existing_session:
+            # Load the restored session file — pi starts fresh by default even with --session-dir
+            session_file_path = str(session_dir / existing_session[0])
+            proc.stdin.write(json.dumps({"type": "switch_session", "sessionPath": session_file_path}) + "\n")
         proc.stdin.write(json.dumps({"type": "prompt", "message": full_prompt}) + "\n")
         proc.stdin.flush()
 
