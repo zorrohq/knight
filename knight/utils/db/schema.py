@@ -92,3 +92,12 @@ Index(
     app_config_table.c.repository,
     app_config_table.c.key,
 )
+
+agent_sessions_table = Table(
+    "agent_sessions",
+    metadata,
+    Column("issue_id", String(255), primary_key=True),
+    Column("session_file_name", String(255), nullable=False),
+    Column("session_data", Text, nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)

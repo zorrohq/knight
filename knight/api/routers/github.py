@@ -140,15 +140,18 @@ def _extract_task(
         comment_body = comment.get("body") or ""
         if not _contains_trigger(comment_body):
             return None
+        # Strip trigger keyword — it's routing noise, not part of the task
+        trigger = settings.github_trigger_keyword or ""
+        clean_comment = comment_body.replace(trigger, "").strip() if trigger else comment_body.strip()
         issue = payload.get("issue", {})
         issue_number = issue.get("number")
         issue_title: str = issue.get("title", "")
         issue_body: str = issue.get("body") or ""
-        instructions = f"## {issue_title}\n\n{issue_body}\n\n---\n\n{comment_body}".strip()
         return {
             **base,
             "issue_id": f"{repo_full_name}#{issue_number}",
-            "instructions": instructions,
+            "issue_context": f"## {issue_title}\n\n{issue_body}".strip(),
+            "instructions": clean_comment,
             "task_type": "issue_comment",
             "trigger_comment_id": comment.get("id"),
         }
