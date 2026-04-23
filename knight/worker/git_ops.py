@@ -40,6 +40,7 @@ class WorkerGitOpsService:
         self.changelog = ChangelogService()
         self.provisioner = WorktreeProvisioner()
         self.state_store = BranchStateStore()
+        self._cached_changelog: str = ""
 
     def finalize_task(
         self,
@@ -81,7 +82,7 @@ class WorkerGitOpsService:
         identity = make_identity(name=task.author_name, email=task.author_email)
 
         if has_changes and task.commit_changes:
-            raw_message = self.commit_messages.generate(task=task, diff_text=diff_text)
+            raw_message, self._cached_changelog = self.commit_messages.generate_both(task=task, diff_text=diff_text)
             commit_message = add_coauthor_trailer(raw_message, identity)
 
             self._run(
@@ -207,7 +208,9 @@ class WorkerGitOpsService:
 
         repo_owner, repo_name = repository_identity.split("/", 1)
         title = f"feat: {task.task_type} for {task.issue_id}" if task.issue_id else f"feat: {task.task_type}"
-        body = self.changelog.for_pr_body(task=task, diff_text=diff_text)
+        changelog = self._cached_changelog or self.changelog.generate(task=task, diff_text=diff_text)
+        body = self.changelog._issue_ref(task)
+        body = f"{changelog}\n\n---\n\n{body}" if body else changelog
 
         # Add collaboration note if we have user identity
         identity = (
@@ -249,7 +252,7 @@ class WorkerGitOpsService:
                     },
                 )
                 if pr_existing and pr_number and diff_text:
-                    update_comment = self.changelog.generate(task=task, diff_text=diff_text)
+                    update_comment = self._cached_changelog or self.changelog.generate(task=task, diff_text=diff_text)
                     post_pr_comment(
                         repo_owner=repo_owner,
                         repo_name=repo_name,
