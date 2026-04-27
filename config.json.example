@@ -1,0 +1,23 @@
+{
+  "provider": "openai",
+  "model_default": "gpt-5-mini-2025-08-07",
+  "model_high": "gpt-5-mini-2025-08-07",
+  "model_low": "gpt-5-mini-2025-08-07",
+  "temperature": 0.0,
+  "max_steps": 25,
+  "command_timeout_seconds": 300,
+  "max_command_output_chars": 12000,
+  "blocked_command_prefixes": ["rm", "sudo", "shutdown", "reboot", "mkfs", "dd"],
+
+  "trigger_keyword": "@knight",
+  "github_token": "",
+  "github_webhook_secret": "",
+  "github_app_id": "",
+  "github_app_private_key": "",
+
+  "repositories": {
+    "owner/repo": {
+      "model_high": "gpt-5.3-codex"
+    }
+  }
+}

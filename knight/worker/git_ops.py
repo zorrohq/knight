@@ -17,7 +17,7 @@ from knight.runtime.github import create_github_pr, get_github_default_branch, p
 from knight.runtime.logging_config import get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
-from knight.utils.db.state_store import BranchStateStore
+from knight.utils.local.state_store import BranchStateStore
 from knight.worker.commit_message import CommitMessageService
 from knight.worker.pr_description import ChangelogService
 from knight.worker.config import settings

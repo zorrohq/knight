@@ -21,7 +21,7 @@ from knight.agents.models import AgentRunResult, AgentTaskRequest, ToolResult
 from knight.agents.runtime_config import AgentConfigResolver
 from knight.runtime.logging_config import ResolvedLoggingSettings, get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
-from knight.utils.db.session_store import AgentSessionStore
+from knight.utils.local.session_store import AgentSessionStore
 
 logger = get_logger(__name__)
 

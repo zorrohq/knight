@@ -6,7 +6,7 @@ import logging
 import sys
 from typing import Any
 
-from knight.utils.db.config_store import ConfigStore
+from knight.utils.local.config_store import ConfigStore
 
 
 @dataclass(slots=True)
