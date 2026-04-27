@@ -20,9 +20,9 @@ The user never touches env vars or Docker flags directly. The CLI owns that tran
 
 ### Location
 
-`config.json` in the current working directory (where the user runs `knight`).
+`.knight/config.json` — lives inside the data directory alongside sessions and state. The entire `.knight/` folder is the single volume mount; config is just another file inside it.
 
-Inside the Docker containers it is mounted at `/app/config.json`. The containers read it via `CONFIG_PATH=/app/config.json`.
+Inside Docker containers the data dir is mounted at `/data/.knight`, so config lives at `/data/.knight/config.json`. The worker reads it via `CONFIG_PATH=/data/.knight/config.json`.
 
 ### Full Schema
 
@@ -91,6 +91,7 @@ Knight stores all runtime state in `.knight/` in the current working directory.
 
 ```
 .knight/
+  config.json         — all knight configuration (provider, models, github, etc.)
   sandboxes/          — cloned repos and git worktrees (can be large)
     <repo-slug>/
       repo/           — bare clone
@@ -101,7 +102,7 @@ Knight stores all runtime state in `.knight/` in the current working directory.
   state.db            — SQLite database tracking branch state per issue
 ```
 
-Inside Docker it is mounted at `/data/.knight`. The container reads it via `KNIGHT_DATA_DIR=/data/.knight` and `WORKER_SANDBOX_ROOT=/data/.knight/sandboxes`.
+Inside Docker the entire `.knight/` dir is mounted at `/data/.knight`. The container reads it via `KNIGHT_DATA_DIR=/data/.knight`, `CONFIG_PATH=/data/.knight/config.json`, and `WORKER_SANDBOX_ROOT=/data/.knight/sandboxes`.
 
 ---
 
@@ -124,7 +125,7 @@ The CLI translates `config.json` fields into these env vars when launching conta
 
 | Env var | Source | Notes |
 |---|---|---|
-| `CONFIG_PATH` | `/app/config.json` | fixed mount path |
+| `CONFIG_PATH` | `/data/.knight/config.json` | derived from data dir mount |
 | `KNIGHT_DATA_DIR` | `/data/.knight` | fixed mount path |
 | `WORKER_SANDBOX_ROOT` | `/data/.knight/sandboxes` | derived from data dir |
 | `WORKER_GIT_USER_NAME` | `config.git_user_name` | |
@@ -165,8 +166,8 @@ Trigger keyword [@knight]:
 Git author name [Knight Bot]:
 Git author email [knight@example.com]:
 
-✓ Written config.json
-✓ Written .env  (add to .gitignore)
+✓ Written .knight/config.json
+✓ Written .env  (add to .gitignore — contains LLM API keys)
 ```
 
 Generates a random webhook secret if left blank. Tells the user to configure that secret in GitHub → Settings → Webhooks.
@@ -226,7 +227,6 @@ docker run -d --name knight-redis --network knight-net redis:7-alpine
 docker run -d --name knight-api \
   --network knight-net \
   -p 8000:8000 \
-  -v "$(pwd)/config.json:/app/config.json:ro" \
   -e API_GITHUB_TOKEN="..." \
   -e API_GITHUB_WEBHOOK_SECRET="..." \
   -e API_GITHUB_TRIGGER_KEYWORD="@knight" \
@@ -236,9 +236,8 @@ docker run -d --name knight-api \
 
 docker run -d --name knight-worker \
   --network knight-net \
-  -v "$(pwd)/config.json:/app/config.json:ro" \
   -v "$(pwd)/.knight:/data/.knight" \
-  -e CONFIG_PATH="/app/config.json" \
+  -e CONFIG_PATH="/data/.knight/config.json" \
   -e KNIGHT_DATA_DIR="/data/.knight" \
   -e WORKER_SANDBOX_ROOT="/data/.knight/sandboxes" \
   -e CELERY_BROKER_URL="redis://knight-redis:6379/0" \
