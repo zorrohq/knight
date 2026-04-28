@@ -43,7 +43,7 @@ _KEY_MAP: dict[str, str] = {
 class ConfigStore:
     def __init__(self, config_path: str | Path | None = None) -> None:
         from knight.worker.config import settings
-        path = Path(config_path or settings.config_path)
+        path = Path(config_path or settings.config_path).expanduser()
         self._config: dict = {}
         if path.is_file():
             try:

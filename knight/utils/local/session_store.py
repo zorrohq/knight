@@ -44,7 +44,7 @@ def _slug(issue_id: str) -> str:
 class AgentSessionStore:
     def __init__(self, data_dir: str | Path | None = None) -> None:
         from knight.worker.config import settings
-        self._sessions_dir = Path(data_dir or settings.knight_data_dir) / "sessions"
+        self._sessions_dir = Path(data_dir or settings.knight_data_dir).expanduser() / "sessions"
         self._sessions_dir.mkdir(parents=True, exist_ok=True)
 
     def load(self, issue_id: str) -> tuple[str, str] | None:

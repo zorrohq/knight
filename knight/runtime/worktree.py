@@ -43,7 +43,7 @@ class WorktreeSandbox:
 
 class WorktreeProvisioner:
     def __init__(self, sandbox_root: str | Path | None = None) -> None:
-        self.sandbox_root = Path(sandbox_root or settings.worker_sandbox_root).resolve()
+        self.sandbox_root = Path(sandbox_root or settings.worker_sandbox_root).expanduser().resolve()
         self.sandbox_root.mkdir(parents=True, exist_ok=True)
         self.lock_manager = RepositoryLockManager()
 

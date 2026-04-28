@@ -10,7 +10,7 @@ The CLI's job is simple:
 
 1. **`knight init`** — interactive wizard that writes `config.json`
 2. **`knight config`** — read/write individual fields in `config.json`
-3. **`knight start`** — launch the Docker stack (api + worker + redis) using the local `config.json` and `.knight/` dir as volumes
+3. **`knight start`** — launch the Docker stack (api + worker + redis) using the local `config.json` and `~/.knight/` dir as volumes
 
 The user never touches env vars or Docker flags directly. The CLI owns that translation layer.
 
@@ -20,7 +20,7 @@ The user never touches env vars or Docker flags directly. The CLI owns that tran
 
 ### Location
 
-`.knight/config.json` — lives inside the data directory alongside sessions and state. The entire `.knight/` folder is the single volume mount; config is just another file inside it.
+`~/.knight/config.json` — lives inside the data directory alongside sessions and state. The entire `~/.knight/` folder is the single volume mount; config is just another file inside it.
 
 Inside Docker containers the data dir is mounted at `/data/.knight`, so config lives at `/data/.knight/config.json`. The worker reads it via `CONFIG_PATH=/data/.knight/config.json`.
 
@@ -87,10 +87,10 @@ Inside Docker containers the data dir is mounted at `/data/.knight`, so config l
 
 ## Data Directory
 
-Knight stores all runtime state in `.knight/` in the current working directory.
+Knight stores all runtime state in `~/.knight/` in the current working directory.
 
 ```
-.knight/
+~/.knight/
   config.json         — all knight configuration (provider, models, github, etc.)
   sandboxes/          — cloned repos and git worktrees (can be large)
     <repo-slug>/
@@ -102,7 +102,7 @@ Knight stores all runtime state in `.knight/` in the current working directory.
   state.db            — SQLite database tracking branch state per issue
 ```
 
-Inside Docker the entire `.knight/` dir is mounted at `/data/.knight`. The container reads it via `KNIGHT_DATA_DIR=/data/.knight`, `CONFIG_PATH=/data/.knight/config.json`, and `WORKER_SANDBOX_ROOT=/data/.knight/sandboxes`.
+Inside Docker the entire `~/.knight/` dir is mounted at `/data/.knight`. The container reads it via `KNIGHT_DATA_DIR=/data/.knight`, `CONFIG_PATH=/data/.knight/config.json`, and `WORKER_SANDBOX_ROOT=/data/.knight/sandboxes`.
 
 ---
 
@@ -236,7 +236,7 @@ docker run -d --name knight-api \
 
 docker run -d --name knight-worker \
   --network knight-net \
-  -v "$(pwd)/.knight:/data/.knight" \
+  -v "~/.knight:/data/.knight" \
   -e CONFIG_PATH="/data/.knight/config.json" \
   -e KNIGHT_DATA_DIR="/data/.knight" \
   -e WORKER_SANDBOX_ROOT="/data/.knight/sandboxes" \

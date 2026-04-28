@@ -48,7 +48,7 @@ def create_celery_app() -> Celery:
 @worker_ready.connect
 def _cleanup_stale_worktrees(sender: object, **kwargs: object) -> None:
     """Remove worktree directories that were left behind by crashed tasks."""
-    sandboxes_root = Path(settings.worker_sandbox_root)
+    sandboxes_root = Path(settings.worker_sandbox_root).expanduser()
     if not sandboxes_root.is_dir():
         return
     cutoff = time.time() - _STALE_WORKTREE_AGE_SECONDS

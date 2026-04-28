@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS agent_branches (
 class BranchStateStore:
     def __init__(self, data_dir: str | Path | None = None) -> None:
         from knight.worker.config import settings
-        db_path = Path(data_dir or settings.knight_data_dir) / "state.db"
+        db_path = Path(data_dir or settings.knight_data_dir).expanduser() / "state.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_path = str(db_path)
         self._lock = threading.Lock()
