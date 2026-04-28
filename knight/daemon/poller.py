@@ -21,12 +21,12 @@ from knight.worker.producer import enqueue_agent_task
 logger = logging.getLogger(__name__)
 
 # Seconds between polls when no job was returned (backs off gradually up to this)
-_POLL_INTERVAL_IDLE_MAX = 30
-_POLL_INTERVAL_IDLE_MIN = 5
-_POLL_INTERVAL_BUSY = 2  # immediately re-poll after receiving a job
+_POLL_INTERVAL_IDLE_MAX = 300
+_POLL_INTERVAL_IDLE_MIN = 30
+_POLL_INTERVAL_BUSY = 5  # immediately re-poll after receiving a job
 
 # Heartbeat cadence — tells cloud this machine is alive
-_HEARTBEAT_INTERVAL = 30
+_HEARTBEAT_INTERVAL = 60
 
 
 class CloudPoller:
