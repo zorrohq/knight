@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,20 +26,15 @@ class APISettings(BaseSettings):
     cors_headers: list[str] = ["*"]
 
     # Shared secret for the generic /api/webhooks endpoint.
-    # Set API_WEBHOOK_SECRET in the environment to require callers to send
-    # an ``X-Webhook-Secret`` header with this value.  If unset, the endpoint
-    # is unauthenticated (suitable only for local/internal use).
     webhook_secret: str = ""
 
-    github_webhook_secret: str = ""
-    github_token: str = ""
-    # GitHub App credentials (preferred over PAT for private repo access).
-    # Set both to enable App-based auth; falls back to github_token if unset.
-    github_app_id: str = ""
-    github_app_private_key: str = ""
-    # Trigger keyword that must appear in a comment body to invoke Knight.
-    # Set to empty string to trigger on every relevant event.
-    github_trigger_keyword: str = "@knight"
+    # GitHub secrets — env vars only, never in config.json.
+    # These deliberately bypass the API_ prefix so the same env vars work
+    # for both the API and worker containers.
+    github_token: str = Field(default="", validation_alias=AliasChoices("GITHUB_TOKEN"))
+    github_webhook_secret: str = Field(default="", validation_alias=AliasChoices("GITHUB_WEBHOOK_SECRET"))
+    github_app_id: str = Field(default="", validation_alias=AliasChoices("GITHUB_APP_ID"))
+    github_app_private_key: str = Field(default="", validation_alias=AliasChoices("GITHUB_APP_PRIVATE_KEY"))
 
 
 settings = APISettings()

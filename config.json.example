@@ -10,10 +10,10 @@
   "blocked_command_prefixes": ["rm", "sudo", "shutdown", "reboot", "mkfs", "dd"],
 
   "trigger_keyword": "@knight",
-  "github_token": "",
-  "github_webhook_secret": "",
-  "github_app_id": "",
-  "github_app_private_key": "",
+
+  "daemon_token": "",
+  "machine_name": "",
+  "cloud_url": "https://knight.zorro.works",
 
   "repositories": {
     "owner/repo": {

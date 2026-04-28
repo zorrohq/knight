@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Maps internal key names (used by AgentConfigResolver) to config.json field names.
 _KEY_MAP: dict[str, str] = {
+    # Agent settings
     "agent_provider": "provider",
     "agent_model_default": "model_default",
     "agent_model_high": "model_high",
@@ -37,13 +38,25 @@ _KEY_MAP: dict[str, str] = {
     "agent_command_timeout_seconds": "command_timeout_seconds",
     "agent_max_command_output_chars": "max_command_output_chars",
     "agent_blocked_command_prefixes": "blocked_command_prefixes",
+    # GitHub auth — config.json uses "trigger_keyword", internal key is the longer form
+    "github_trigger_keyword": "trigger_keyword",
+    # Cloud daemon settings
+    "daemon_token": "daemon_token",
+    "cloud_url": "cloud_url",
+    "machine_name": "machine_name",
 }
+
+_DEFAULT_CONFIG_PATH = "~/.knight/config.json"
+
+
+def _resolve_config_path() -> Path:
+    import os
+    return Path(os.environ.get("CONFIG_PATH", _DEFAULT_CONFIG_PATH)).expanduser()
 
 
 class ConfigStore:
     def __init__(self, config_path: str | Path | None = None) -> None:
-        from knight.worker.config import settings
-        path = Path(config_path or settings.config_path).expanduser()
+        path = Path(config_path).expanduser() if config_path else _resolve_config_path()
         self._config: dict = {}
         if path.is_file():
             try:

@@ -28,7 +28,11 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from knight.api.config import settings
 from knight.runtime.github_app import get_installation_token
+from knight.utils.local.config_store import ConfigStore
 from knight.worker.producer import enqueue_agent_task
+
+# Non-sensitive config (trigger keyword, etc.) — loaded once at startup.
+_cfg = ConfigStore()
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +83,7 @@ def _verify_signature(body: bytes, signature_header: str | None) -> None:
 
 
 def _contains_trigger(text: str) -> bool:
-    keyword = settings.github_trigger_keyword
+    keyword = _cfg.get_string(key="github_trigger_keyword", default="@knight")
     if not keyword:
         return True
     return keyword.lower() in text.lower()
@@ -92,11 +96,13 @@ async def _resolve_token(installation_id: int | None) -> str:
     exchange them for a short-lived installation access token.
     Otherwise fall back to the configured PAT.
     """
-    if settings.github_app_id and settings.github_app_private_key and installation_id:
+    app_id = settings.github_app_id
+    app_private_key = settings.github_app_private_key
+    if app_id and app_private_key and installation_id:
         try:
             token = await get_installation_token(
-                app_id=settings.github_app_id,
-                private_key=settings.github_app_private_key,
+                app_id=app_id,
+                private_key=app_private_key,
                 installation_id=installation_id,
             )
             logger.debug(
@@ -159,7 +165,7 @@ def _extract_task(
         if not _contains_trigger(comment_body):
             return None
         # Strip trigger keyword — it's routing noise, not part of the task
-        trigger = settings.github_trigger_keyword or ""
+        trigger = _cfg.get_string(key="github_trigger_keyword", default="@knight")
         clean_comment = comment_body.replace(trigger, "").strip() if trigger else comment_body.strip()
         issue = payload.get("issue", {})
         issue_number = issue.get("number")
