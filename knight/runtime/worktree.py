@@ -273,7 +273,7 @@ class WorktreeProvisioner:
                 "git",
                 "worktree",
                 "add",
-                "-b",
+                "-B",
                 branch_name,
                 str(worktree_path),
                 branch_ref,
