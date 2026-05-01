@@ -165,17 +165,30 @@ class WorktreeProvisioner:
         branch_ref: str | None,
         base_branch: str,
     ) -> None:
+        # If the remote branch exists, start from it (picks up prior work).
+        # Otherwise start fresh from the base branch.
         start_point = branch_ref or self._resolve_remote_branch(repo_path, base_branch)
+
+        # Always tear down any leftover state before creating the worktree.
+        # This handles: directory missing but git registration lingering, local
+        # branch left over from a previous run, or a stale worktree lock.
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(worktree_path)],
+            cwd=repo_path, capture_output=True, timeout=_GIT_TIMEOUT, check=False,
+        )
+        # Fallback: if the directory still exists (e.g. not a registered worktree,
+        # or git worktree remove failed), delete it so git worktree add won't
+        # fail with "path already exists".
         if worktree_path.exists():
-            self._checkout_existing_worktree_branch(
-                worktree_path=worktree_path,
-                branch_name=branch_name,
-                branch_ref=branch_ref,
-                start_point=start_point,
-            )
-            self._run(["git", "reset", "--hard", start_point], cwd=worktree_path)
-            self._run(["git", "clean", "-fd"], cwd=worktree_path)
-            return
+            shutil.rmtree(worktree_path, ignore_errors=True)
+        subprocess.run(
+            ["git", "worktree", "prune", "--expire=now"],
+            cwd=repo_path, capture_output=True, timeout=_GIT_TIMEOUT, check=False,
+        )
+        subprocess.run(
+            ["git", "branch", "-D", branch_name],
+            cwd=repo_path, capture_output=True, timeout=_GIT_TIMEOUT, check=False,
+        )
 
         self._create_worktree(
             repo_path=repo_path,
