@@ -73,7 +73,7 @@ class WorktreeProvisioner:
                 github_token=github_token,
             )
         else:
-            self.refresh_repository(repo_path=repo_path, base_branch=base_branch)
+            self.refresh_repository(repo_path=repo_path, base_branch=base_branch, github_token=github_token)
 
         return RepositorySandbox(
             repository_key=resolved_repository_key,
@@ -134,7 +134,21 @@ class WorktreeProvisioner:
             worktree_path=worktree_path,
         )
 
-    def refresh_repository(self, *, repo_path: Path, base_branch: str) -> None:
+    def refresh_repository(self, *, repo_path: Path, base_branch: str, github_token: str = "") -> None:
+        if github_token:
+            remote_url_result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=repo_path,
+                text=True,
+                capture_output=True,
+                timeout=_GIT_TIMEOUT,
+                check=False,
+            )
+            if remote_url_result.returncode == 0:
+                existing_url = remote_url_result.stdout.strip()
+                authed_url = self._inject_token_into_url(existing_url, github_token)
+                if authed_url != existing_url:
+                    self._run(["git", "remote", "set-url", "origin", authed_url], cwd=repo_path)
         self._run(["git", "fetch", "--all", "--prune"], cwd=repo_path)
         resolved_base = self._resolve_base_branch(repo_path=repo_path, base_branch=base_branch)
         reset_target = self._resolve_remote_branch(repo_path, resolved_base)

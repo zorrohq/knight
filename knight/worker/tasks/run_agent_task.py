@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from typing import Any
 
+import httpx
 from billiard.exceptions import SoftTimeLimitExceeded
 
 from knight.agents.models import AgentTaskRequest
@@ -8,11 +9,48 @@ from knight.agents.service import CodingAgentService
 from knight.runtime.github import post_issue_comment, react_to_comment
 from knight.runtime.logging_config import get_logger, setup_logging
 from knight.runtime.repository_identity import normalize_repository_identity
+from knight.utils.local.config_store import ConfigStore
 from knight.worker.celery_app import _DLQ_QUEUE, celery_app
 from knight.worker.git_ops import WorkerGitOpsService
 from knight.worker.runtime import WorkerRuntimeService
 
 logger = get_logger(__name__)
+
+
+def _report_job_result(
+    job_id: str,
+    *,
+    status: str,
+    result_status: str = "",
+    block_reason: str = "",
+    pr_url: str = "",
+    final_message: str = "",
+    iterations: int = 0,
+) -> None:
+    """POST job result back to the cloud coordination server."""
+    if not job_id:
+        return
+    cfg = ConfigStore()
+    cloud_url = cfg.get_string(key="cloud_url", default="https://knight.zorro.works")
+    token = cfg.get_string(key="daemon_token")
+    if not token:
+        return
+    try:
+        with httpx.Client(base_url=cloud_url, headers={"Authorization": f"Bearer {token}"}, timeout=15) as client:
+            client.post(
+                f"/api/knight/daemon/jobs/{job_id}/result",
+                json={
+                    "status": status,
+                    "result_status": result_status or None,
+                    "block_reason": block_reason or None,
+                    "pr_url": pr_url or None,
+                    "final_message": final_message or None,
+                    "iterations": iterations or None,
+                },
+            )
+        logger.info("job result reported to cloud", extra={"job_id": job_id, "status": status})
+    except Exception:
+        logger.exception("failed to report job result to cloud", extra={"job_id": job_id})
 
 
 def _post_error_comment(task: AgentTaskRequest, message: str) -> None:
@@ -113,6 +151,7 @@ def run_agent_task(
             "I ran out of time working on this and had to stop. "
             "You can trigger me again and I'll pick up where I left off.",
         )
+        _report_job_result(task.cloud_job_id, status="failed", result_status="timeout")
         raise
 
     except Exception as exc:
@@ -123,11 +162,20 @@ def run_agent_task(
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc)
 
-        # Retries exhausted — post error comment and route to DLQ.
+        # Retries exhausted — mark as blocked so the user can re-trigger.
         _post_error_comment(
             task,
-            "I hit an unexpected error while working on this. "
-            "Check the logs for details, or trigger me again to retry.",
+            "I've hit repeated errors and can't continue right now.\n\n"
+            f"**Error:** {exc}\n\n"
+            "Tag me again with `@knight` to retry — you can include updated instructions too, "
+            "e.g. `@knight try a different approach`.",
+        )
+        _report_job_result(
+            task.cloud_job_id,
+            status="blocked",
+            block_reason="exhausted_retries",
+            result_status="error",
+            final_message=str(exc),
         )
         from knight.worker.tasks.dlq_task import record_dlq_entry
         record_dlq_entry.apply_async(
@@ -155,6 +203,15 @@ def run_agent_task(
             "post_run_push_completed": post_run["push_completed"],
             "post_run_pr_url": post_run.get("pr_url") or result.pr_url,
         },
+    )
+
+    _report_job_result(
+        task.cloud_job_id,
+        status="completed",
+        result_status=result.status,
+        pr_url=post_run.get("pr_url") or result.pr_url,
+        final_message=result.final_message,
+        iterations=result.iterations,
     )
 
     task_dump = result.task.model_dump()

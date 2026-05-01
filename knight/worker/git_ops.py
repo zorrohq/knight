@@ -113,14 +113,12 @@ class WorkerGitOpsService:
 
         if commit_created and task.push_changes:
             push_attempted = True
+            push_remote = task.push_remote or "origin"
+            if task.github_token and task.repository_url:
+                authed_url = WorktreeProvisioner._inject_token_into_url(task.repository_url, task.github_token)
+                self._run(["git", "remote", "set-url", push_remote, authed_url], cwd=worktree_path)
             self._run(
-                [
-                    "git",
-                    "push",
-                    "--set-upstream",
-                    task.push_remote or "origin",
-                    sandbox["branch_name"],
-                ],
+                ["git", "push", "--set-upstream", push_remote, sandbox["branch_name"]],
                 cwd=worktree_path,
             )
             push_completed = True
