@@ -162,18 +162,11 @@ def run_agent_task(
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc)
 
-        # Retries exhausted — mark as blocked so the user can re-trigger.
-        _post_error_comment(
-            task,
-            "I've hit repeated errors and can't continue right now.\n\n"
-            f"**Error:** {exc}\n\n"
-            "Tag me again with `@knight` to retry — you can include updated instructions too, "
-            "e.g. `@knight try a different approach`.",
-        )
+        # Retries exhausted — report failure to cloud (cloud tracks attempt count
+        # and transitions to blocked once MAX_JOB_ATTEMPTS is reached).
         _report_job_result(
             task.cloud_job_id,
-            status="blocked",
-            block_reason="exhausted_retries",
+            status="failed",
             result_status="error",
             final_message=str(exc),
         )

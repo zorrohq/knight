@@ -26,7 +26,10 @@ _POLL_INTERVAL_IDLE_MIN = 30
 _POLL_INTERVAL_BUSY = 5  # immediately re-poll after receiving a job
 
 # Heartbeat cadence — tells cloud this machine is alive
-_HEARTBEAT_INTERVAL = 60
+_HEARTBEAT_INTERVAL_BOOT   = 30   # first 3 minutes after startup
+_HEARTBEAT_BOOT_WINDOW     = 180  # seconds to stay in boot cadence
+_HEARTBEAT_INTERVAL_ACTIVE = 60   # jobs running (lease renewal)
+_HEARTBEAT_INTERVAL_IDLE   = 180  # no jobs (just lastSeenAt)
 
 
 class CloudPoller:
@@ -97,6 +100,8 @@ class CloudPoller:
                 self._stop_event.wait(_POLL_INTERVAL_IDLE_MAX)
 
     def _heartbeat_loop(self) -> None:
+        started_at = time.monotonic()
+        active: list[str] = []  # safe default for first iteration
         while not self._stop_event.is_set():
             try:
                 with self._lock:
@@ -108,7 +113,19 @@ class CloudPoller:
                 )
             except Exception:
                 logger.debug("heartbeat failed; will retry", exc_info=True)
-            self._stop_event.wait(_HEARTBEAT_INTERVAL)
+
+            # Re-read active jobs for interval decision so a job dispatched
+            # during the HTTP call is reflected immediately
+            with self._lock:
+                has_active = bool(self._active_jobs)
+
+            if time.monotonic() - started_at < _HEARTBEAT_BOOT_WINDOW:
+                interval = _HEARTBEAT_INTERVAL_BOOT
+            elif has_active:
+                interval = _HEARTBEAT_INTERVAL_ACTIVE
+            else:
+                interval = _HEARTBEAT_INTERVAL_IDLE
+            self._stop_event.wait(interval)
 
     # ------------------------------------------------------------------
     # Job lifecycle
