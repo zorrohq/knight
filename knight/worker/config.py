@@ -9,8 +9,8 @@ class WorkerSettings(BaseSettings):
     )
 
     celery_app_name: str = "knight"
-    celery_broker_url: str = "redis://redis:6379/0"
-    celery_result_backend: str = "redis://redis:6379/1"
+    celery_broker_url: str = "redis://knight-redis:6379/0"
+    celery_result_backend: str = "redis://knight-redis:6379/1"
     celery_task_default_queue: str = "knight.default"
     celery_task_serializer: str = "json"
     celery_result_serializer: str = "json"

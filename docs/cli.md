@@ -120,6 +120,8 @@ The CLI translates `config.json` fields into these env vars when launching conta
 | `API_GITHUB_APP_PRIVATE_KEY` | `config.github_app_private_key` | |
 | `API_GITHUB_TRIGGER_KEYWORD` | `config.trigger_keyword` | |
 | `API_CORS_ORIGINS` | hardcoded or future config field | |
+| `CELERY_BROKER_URL` | `redis://knight-redis:6379/0` | internal network, fixed — no `API_` prefix so the poller (WorkerSettings) can read it |
+| `CELERY_RESULT_BACKEND` | `redis://knight-redis:6379/1` | internal network, fixed — no `API_` prefix |
 
 ### Worker container (no prefix)
 
@@ -230,7 +232,8 @@ docker run -d --name knight-api \
   -e API_GITHUB_TOKEN="..." \
   -e API_GITHUB_WEBHOOK_SECRET="..." \
   -e API_GITHUB_TRIGGER_KEYWORD="@knight" \
-  -e API_CELERY_BROKER_URL="redis://knight-redis:6379/0" \
+  -e CELERY_BROKER_URL="redis://knight-redis:6379/0" \
+  -e CELERY_RESULT_BACKEND="redis://knight-redis:6379/1" \
   ghcr.io/you/knight:latest \
   fastapi run knight/api/app.py
 
