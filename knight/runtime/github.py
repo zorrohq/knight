@@ -55,7 +55,7 @@ def create_github_pr(
         for the head branch already existed and was returned instead of created.
     """
     # Check for an existing PR first to avoid a needless 422 round-trip.
-    existing = _find_existing_pr(
+    existing = find_existing_pr(
         repo_owner=repo_owner,
         repo_name=repo_name,
         github_token=github_token,
@@ -99,7 +99,7 @@ def create_github_pr(
         return None, None, False
 
 
-def _find_existing_pr(
+def find_existing_pr(
     *,
     repo_owner: str,
     repo_name: str,

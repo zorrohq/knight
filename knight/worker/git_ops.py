@@ -13,7 +13,7 @@ from knight.runtime.authorship import (
     add_pr_collaboration_note,
     make_identity,
 )
-from knight.runtime.github import _find_existing_pr, create_github_pr, get_github_default_branch, post_issue_comment, post_pr_comment
+from knight.runtime.github import find_existing_pr, create_github_pr, get_github_default_branch, post_issue_comment, post_pr_comment
 from knight.runtime.logging_config import get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
@@ -330,7 +330,7 @@ class WorkerGitOpsService:
         repo_owner, repo_name = repository_identity.split("/", 1)
         mention = f"@{task.author_name}" if task.author_name else "Hey"
         try:
-            pr_url, _, _ = _find_existing_pr(
+            pr_url, _ = find_existing_pr(
                 repo_owner=repo_owner,
                 repo_name=repo_name,
                 github_token=github_token,
