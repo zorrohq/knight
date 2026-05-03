@@ -20,6 +20,8 @@ logger = get_logger(__name__)
 def _report_job_result(
     job_id: str,
     *,
+    cloud_url: str,
+    token: str,
     status: str,
     result_status: str = "",
     block_reason: str = "",
@@ -28,12 +30,7 @@ def _report_job_result(
     iterations: int = 0,
 ) -> None:
     """POST job result back to the cloud coordination server."""
-    if not job_id:
-        return
-    cfg = ConfigStore()
-    cloud_url = cfg.get_string(key="cloud_url", default="https://knight.zorro.works")
-    token = cfg.get_string(key="daemon_token")
-    if not token:
+    if not job_id or not token:
         return
     try:
         with httpx.Client(base_url=cloud_url, headers={"Authorization": f"Bearer {token}"}, timeout=15) as client:
@@ -93,6 +90,9 @@ def run_agent_task(
 ) -> dict[str, Any]:
     log_config = setup_logging()
     task = AgentTaskRequest.model_validate(payload or {})
+    cfg = ConfigStore()
+    _cloud_url = cfg.get_string(key="cloud_url", default="https://knight.zorro.works")
+    _daemon_token = cfg.get_string(key="daemon_token")
     repository_identity = normalize_repository_identity(
         repository_url=task.repository_url,
         repository_local_path=task.repository_local_path,
@@ -151,7 +151,7 @@ def run_agent_task(
             "I ran out of time working on this and had to stop. "
             "You can trigger me again and I'll pick up where I left off.",
         )
-        _report_job_result(task.cloud_job_id, status="failed", result_status="timeout")
+        _report_job_result(task.cloud_job_id, cloud_url=_cloud_url, token=_daemon_token, status="failed", result_status="timeout")
         raise
 
     except Exception as exc:
@@ -162,10 +162,17 @@ def run_agent_task(
         if self.request.retries < self.max_retries:
             raise self.retry(exc=exc)
 
-        # Retries exhausted — report failure to cloud (cloud tracks attempt count
-        # and transitions to blocked once MAX_JOB_ATTEMPTS is reached).
+        # Retries exhausted — post error comment and report failure to cloud
+        # (cloud tracks attempt count and transitions to blocked once MAX_JOB_ATTEMPTS is reached).
+        _post_error_comment(
+            task,
+            "I hit an unexpected error while working on this. "
+            "Check the logs for details, or trigger me again to retry.",
+        )
         _report_job_result(
             task.cloud_job_id,
+            cloud_url=_cloud_url,
+            token=_daemon_token,
             status="failed",
             result_status="error",
             final_message=str(exc),
@@ -200,6 +207,8 @@ def run_agent_task(
 
     _report_job_result(
         task.cloud_job_id,
+        cloud_url=_cloud_url,
+        token=_daemon_token,
         status="completed",
         result_status=result.status,
         pr_url=post_run.get("pr_url") or result.pr_url,
