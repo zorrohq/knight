@@ -298,12 +298,12 @@ class WorkerGitOpsService:
         number = task.issue_id.split("#", 1)[-1]
         if not number.isdigit():
             return
-        mention = f"@{task.author_name}" if task.author_name else "Hey"
+        greeting = f"Hey @{task.author_name}!" if task.author_name else "Hey!"
         sha_line = f"\n\n<!-- knight -->\nCommit: `{commit_sha}`" if commit_sha else ""
         if pr_existing:
-            comment = f"Hey {mention}! I've pushed updates to the existing PR: {pr_url}{sha_line}"
+            comment = f"{greeting} I've pushed updates to the existing PR: {pr_url}{sha_line}"
         else:
-            comment = f"Hey {mention}! I've opened a PR for your review: {pr_url}{sha_line}"
+            comment = f"{greeting} I've opened a PR for your review: {pr_url}{sha_line}"
         post_issue_comment(
             repo_owner=repo_owner,
             repo_name=repo_name,
