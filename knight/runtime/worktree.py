@@ -185,10 +185,11 @@ class WorktreeProvisioner:
             ["git", "worktree", "prune", "--expire=now"],
             cwd=repo_path, capture_output=True, timeout=_GIT_TIMEOUT, check=False,
         )
-        subprocess.run(
-            ["git", "branch", "-D", branch_name],
-            cwd=repo_path, capture_output=True, timeout=_GIT_TIMEOUT, check=False,
-        )
+        if branch_ref:
+            subprocess.run(
+                ["git", "branch", "-D", branch_name],
+                cwd=repo_path, capture_output=True, timeout=_GIT_TIMEOUT, check=False,
+            )
 
         self._create_worktree(
             repo_path=repo_path,
