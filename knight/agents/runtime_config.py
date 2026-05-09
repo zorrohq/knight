@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from knight.agents.config import settings
-from knight.utils.db.config_store import ConfigStore
+from knight.utils.local.config_store import ConfigStore
 
 ALLOWED_PROVIDERS = {"openai", "anthropic", "google-genai"}
 

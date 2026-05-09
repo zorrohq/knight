@@ -43,7 +43,7 @@ class WorktreeSandbox:
 
 class WorktreeProvisioner:
     def __init__(self, sandbox_root: str | Path | None = None) -> None:
-        self.sandbox_root = Path(sandbox_root or settings.worker_sandbox_root).resolve()
+        self.sandbox_root = Path(sandbox_root or settings.worker_sandbox_root).expanduser().resolve()
         self.sandbox_root.mkdir(parents=True, exist_ok=True)
         self.lock_manager = RepositoryLockManager()
 
@@ -73,7 +73,7 @@ class WorktreeProvisioner:
                 github_token=github_token,
             )
         else:
-            self.refresh_repository(repo_path=repo_path, base_branch=base_branch)
+            self.refresh_repository(repo_path=repo_path, base_branch=base_branch, github_token=github_token)
 
         return RepositorySandbox(
             repository_key=resolved_repository_key,
@@ -134,7 +134,21 @@ class WorktreeProvisioner:
             worktree_path=worktree_path,
         )
 
-    def refresh_repository(self, *, repo_path: Path, base_branch: str) -> None:
+    def refresh_repository(self, *, repo_path: Path, base_branch: str, github_token: str = "") -> None:
+        if github_token:
+            remote_url_result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=repo_path,
+                text=True,
+                capture_output=True,
+                timeout=_GIT_TIMEOUT,
+                check=False,
+            )
+            if remote_url_result.returncode == 0:
+                existing_url = remote_url_result.stdout.strip()
+                authed_url = self._inject_token_into_url(existing_url, github_token)
+                if authed_url != existing_url:
+                    self._run(["git", "remote", "set-url", "origin", authed_url], cwd=repo_path)
         self._run(["git", "fetch", "--all", "--prune"], cwd=repo_path)
         resolved_base = self._resolve_base_branch(repo_path=repo_path, base_branch=base_branch)
         reset_target = self._resolve_remote_branch(repo_path, resolved_base)
@@ -151,17 +165,31 @@ class WorktreeProvisioner:
         branch_ref: str | None,
         base_branch: str,
     ) -> None:
+        # If the remote branch exists, start from it (picks up prior work).
+        # Otherwise start fresh from the base branch.
         start_point = branch_ref or self._resolve_remote_branch(repo_path, base_branch)
+
+        # Always tear down any leftover state before creating the worktree.
+        # This handles: directory missing but git registration lingering, local
+        # branch left over from a previous run, or a stale worktree lock.
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(worktree_path)],
+            cwd=repo_path, capture_output=True, timeout=_GIT_TIMEOUT, check=False,
+        )
+        # Fallback: if the directory still exists (e.g. not a registered worktree,
+        # or git worktree remove failed), delete it so git worktree add won't
+        # fail with "path already exists".
         if worktree_path.exists():
-            self._checkout_existing_worktree_branch(
-                worktree_path=worktree_path,
-                branch_name=branch_name,
-                branch_ref=branch_ref,
-                start_point=start_point,
+            shutil.rmtree(worktree_path, ignore_errors=True)
+        subprocess.run(
+            ["git", "worktree", "prune", "--expire=now"],
+            cwd=repo_path, capture_output=True, timeout=_GIT_TIMEOUT, check=False,
+        )
+        if branch_ref:
+            subprocess.run(
+                ["git", "branch", "-D", branch_name],
+                cwd=repo_path, capture_output=True, timeout=_GIT_TIMEOUT, check=False,
             )
-            self._run(["git", "reset", "--hard", start_point], cwd=worktree_path)
-            self._run(["git", "clean", "-fd"], cwd=worktree_path)
-            return
 
         self._create_worktree(
             repo_path=repo_path,
@@ -259,7 +287,7 @@ class WorktreeProvisioner:
                 "git",
                 "worktree",
                 "add",
-                "-b",
+                "-B",
                 branch_name,
                 str(worktree_path),
                 branch_ref,

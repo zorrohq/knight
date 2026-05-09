@@ -51,7 +51,11 @@ class CommitMessageService:
             content = response.content if isinstance(response.content, str) else ""
             data = json.loads(content.strip())
             commit_msg = str(data.get("commit", "")).strip().splitlines()[0].strip()
-            changelog = str(data.get("changelog", "")).strip()
+            raw_changelog = data.get("changelog", "")
+            if isinstance(raw_changelog, list):
+                changelog = "\n".join(str(i) for i in raw_changelog)
+            else:
+                changelog = str(raw_changelog).strip()
             if commit_msg and changelog:
                 return commit_msg, changelog
         except Exception:

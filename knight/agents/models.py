@@ -21,6 +21,7 @@ class AgentTaskRequest(BaseModel):
     author_name: str = ""
     author_email: str = ""
     trigger_comment_id: int | None = None
+    cloud_job_id: str = ""
 
 
 class ToolResult(BaseModel):

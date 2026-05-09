@@ -13,11 +13,11 @@ from knight.runtime.authorship import (
     add_pr_collaboration_note,
     make_identity,
 )
-from knight.runtime.github import create_github_pr, get_github_default_branch, post_issue_comment, post_pr_comment
+from knight.runtime.github import find_existing_pr, create_github_pr, get_github_default_branch, post_issue_comment, post_pr_comment
 from knight.runtime.logging_config import get_logger
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.runtime.worktree import WorktreeProvisioner
-from knight.utils.db.state_store import BranchStateStore
+from knight.utils.local.state_store import BranchStateStore
 from knight.worker.commit_message import CommitMessageService
 from knight.worker.pr_description import ChangelogService
 from knight.worker.config import settings
@@ -81,6 +81,13 @@ class WorkerGitOpsService:
         # Build commit attribution
         identity = make_identity(name=task.author_name, email=task.author_email)
 
+        if not has_changes:
+            self._post_no_changes_notification(
+                task=task,
+                repository_identity=repository_identity,
+                sandbox=sandbox,
+            )
+
         if has_changes and task.commit_changes:
             raw_message, self._cached_changelog = self.commit_messages.generate_both(task=task, diff_text=diff_text)
             commit_message = add_coauthor_trailer(raw_message, identity)
@@ -113,14 +120,12 @@ class WorkerGitOpsService:
 
         if commit_created and task.push_changes:
             push_attempted = True
+            push_remote = task.push_remote or "origin"
+            if task.github_token and task.repository_url:
+                authed_url = WorktreeProvisioner._inject_token_into_url(task.repository_url, task.github_token)
+                self._run(["git", "remote", "set-url", push_remote, authed_url], cwd=worktree_path)
             self._run(
-                [
-                    "git",
-                    "push",
-                    "--set-upstream",
-                    task.push_remote or "origin",
-                    sandbox["branch_name"],
-                ],
+                ["git", "push", "--set-upstream", push_remote, sandbox["branch_name"]],
                 cwd=worktree_path,
             )
             push_completed = True
@@ -293,12 +298,12 @@ class WorkerGitOpsService:
         number = task.issue_id.split("#", 1)[-1]
         if not number.isdigit():
             return
-        mention = f"@{task.author_name}" if task.author_name else "Hey"
+        greeting = f"Hey @{task.author_name}!" if task.author_name else "Hey!"
         sha_line = f"\n\n<!-- knight -->\nCommit: `{commit_sha}`" if commit_sha else ""
         if pr_existing:
-            comment = f"Hey {mention}! I've pushed updates to the existing PR: {pr_url}{sha_line}"
+            comment = f"{greeting} I've pushed updates to the existing PR: {pr_url}{sha_line}"
         else:
-            comment = f"Hey {mention}! I've opened a PR for your review: {pr_url}{sha_line}"
+            comment = f"{greeting} I've opened a PR for your review: {pr_url}{sha_line}"
         post_issue_comment(
             repo_owner=repo_owner,
             repo_name=repo_name,
@@ -306,6 +311,54 @@ class WorkerGitOpsService:
             github_token=github_token,
             body=comment,
         )
+
+    def _post_no_changes_notification(
+        self,
+        *,
+        task: AgentTaskRequest,
+        repository_identity: str,
+        sandbox: dict[str, str],
+    ) -> None:
+        if not task.issue_id or "#" not in task.issue_id or "/" not in repository_identity:
+            return
+        github_token = task.github_token or settings.github_token
+        if not github_token:
+            return
+        number = task.issue_id.split("#", 1)[-1]
+        if not number.isdigit():
+            return
+        repo_owner, repo_name = repository_identity.split("/", 1)
+        mention = f"@{task.author_name}" if task.author_name else "Hey"
+        try:
+            pr_url, _ = find_existing_pr(
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                github_token=github_token,
+                head_branch=sandbox["branch_name"],
+            )
+            if pr_url:
+                comment = (
+                    f"Hey {mention}! Looks like I already worked on this — "
+                    f"there's a PR with my changes here: {pr_url}\n\n"
+                    f"Tag me with `@knight` if you'd like me to make any adjustments."
+                )
+            else:
+                comment = (
+                    f"Hey {mention}! I reviewed the codebase but didn't find anything to change.\n\n"
+                    f"Tag me with `@knight` if I missed something or you'd like me to try a different approach."
+                )
+            post_issue_comment(
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                issue_number=int(number),
+                github_token=github_token,
+                body=comment,
+            )
+        except Exception:
+            logger.exception(
+                "failed to post no-changes notification",
+                extra={"repository": repository_identity, "issue_id": task.issue_id},
+            )
 
     def _run(self, command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
         completed = subprocess.run(
