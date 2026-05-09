@@ -195,6 +195,37 @@ def post_pr_comment(
     )
 
 
+def fetch_issue_comments(
+    *,
+    repo_owner: str,
+    repo_name: str,
+    issue_number: int,
+    github_token: str,
+) -> list[dict]:
+    """Return all comments on a GitHub issue as a list of {id, author, body} dicts."""
+    try:
+        response = _make_session().get(
+            f"{_GITHUB_API}/repos/{repo_owner}/{repo_name}/issues/{issue_number}/comments",
+            headers=_auth_headers(github_token),
+            params={"per_page": 100},
+            timeout=30,
+        )
+        if response.status_code != _HTTP_OK:
+            logger.warning("could not fetch issue comments (%s)", response.status_code)
+            return []
+        return [
+            {
+                "id": c.get("id"),
+                "author": (c.get("user") or {}).get("login", ""),
+                "body": c.get("body") or "",
+            }
+            for c in response.json()
+        ]
+    except requests.RequestException:
+        logger.exception("HTTP error fetching issue comments")
+    return []
+
+
 def get_github_default_branch(
     *,
     repo_owner: str,

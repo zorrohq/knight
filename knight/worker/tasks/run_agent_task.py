@@ -50,6 +50,32 @@ def _report_job_result(
         logger.exception("failed to report job result to cloud", extra={"job_id": job_id})
 
 
+def _post_plan_comment(task: AgentTaskRequest, plan_text: str) -> None:
+    """Post the agent's plan as a GitHub issue comment."""
+    if not (task.github_token and task.issue_id and "#" in task.issue_id):
+        return
+    try:
+        repo, number_str = task.issue_id.rsplit("#", 1)
+        if not number_str.isdigit() or "/" not in repo:
+            return
+        repo_owner, repo_name = repo.split("/", 1)
+        body = (
+            f"<!-- knight-plan -->\n\n"
+            f"{plan_text}\n\n"
+            f"---\n\n"
+            f"Reply with `@knight CONFIRM` to start implementation."
+        )
+        post_issue_comment(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            issue_number=int(number_str),
+            github_token=task.github_token,
+            body=body,
+        )
+    except Exception:
+        logger.exception("failed to post plan comment to GitHub")
+
+
 def _post_error_comment(task: AgentTaskRequest, message: str) -> None:
     """Post an error comment to the issue if we have enough context to do so."""
     if not (task.github_token and task.issue_id and "#" in task.issue_id):
@@ -131,6 +157,11 @@ def run_agent_task(
             },
         )
 
+        # Plan mode: clear any prior session so the agent starts fresh
+        if prepared_task.execution_mode == "plan":
+            from knight.utils.local.session_store import AgentSessionStore
+            AgentSessionStore().delete(prepared_task.issue_id)
+
         agent = CodingAgentService()
         result = agent.run(prepared_task, sandbox=sandbox, log_config=log_config)
 
@@ -140,6 +171,20 @@ def run_agent_task(
             sandbox=result.sandbox,
             agent_pr_url=result.pr_url,
         )
+
+        # Plan mode: post the plan as a comment and save pending_confirmation state
+        if prepared_task.execution_mode == "plan":
+            _post_plan_comment(prepared_task, result.final_message)
+            if repository_identity and prepared_task.issue_id:
+                from knight.utils.local.state_store import BranchRecord, BranchStateStore
+                BranchStateStore().upsert_branch(BranchRecord(
+                    repository=repository_identity,
+                    issue_id=prepared_task.issue_id,
+                    base_branch=prepared_task.base_branch,
+                    agent_branch=prepared_task.branch_name,
+                    status="pending_confirmation",
+                    plan_text=result.final_message,
+                ))
 
     except SoftTimeLimitExceeded:
         logger.error(

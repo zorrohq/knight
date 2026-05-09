@@ -10,6 +10,7 @@
   "blocked_command_prefixes": ["rm", "sudo", "shutdown", "reboot", "mkfs", "dd"],
 
   "trigger_keyword": "@knight",
+  "plan_mode": false,
 
   "daemon_token": "",
   "machine_name": "",

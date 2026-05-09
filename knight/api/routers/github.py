@@ -171,6 +171,34 @@ def _extract_task(
         issue_number = issue.get("number")
         issue_title: str = issue.get("title", "")
         issue_body: str = issue.get("body") or ""
+
+        cfg_plan_mode = _cfg.get_bool(key="plan_mode", default=False)
+        execution_mode = "implement"
+
+        if cfg_plan_mode:
+            is_confirm = "CONFIRM" in clean_comment
+
+            if is_confirm:
+                from knight.utils.local.state_store import BranchStateStore
+                state_store = BranchStateStore()
+                issue_id = f"{repo_full_name}#{issue_number}"
+                pending = state_store.get_pending_plan(repository=repo_full_name, issue_id=issue_id)
+                if pending:
+                    return {
+                        **base,
+                        "issue_id": issue_id,
+                        "issue_context": f"## {issue_title}\n\n{issue_body}".strip(),
+                        "instructions": clean_comment,
+                        "task_type": "issue_comment",
+                        "trigger_comment_id": comment.get("id"),
+                        "execution_mode": "implement",
+                        "plan_context": pending.plan_text,
+                        "branch_name": pending.agent_branch,
+                    }
+                # No pending plan found — fall through to plan mode
+
+            execution_mode = "plan"
+
         return {
             **base,
             "issue_id": f"{repo_full_name}#{issue_number}",
@@ -178,6 +206,7 @@ def _extract_task(
             "instructions": clean_comment,
             "task_type": "issue_comment",
             "trigger_comment_id": comment.get("id"),
+            "execution_mode": execution_mode,
         }
 
     if event == "pull_request_review_comment":

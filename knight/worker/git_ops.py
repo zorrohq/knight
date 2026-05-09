@@ -60,6 +60,26 @@ class WorkerGitOpsService:
         status_text = self._run(["git", "status", "--short"], cwd=worktree_path).stdout
         has_changes = bool(status_text.strip())
 
+        # Plan mode: agent only read the codebase — skip all git operations
+        if task.execution_mode == "plan":
+            if task.cleanup_worktree:
+                self.provisioner.remove_worktree(
+                    repo_path=repo_path,
+                    worktree_path=worktree_path,
+                    branch_name=sandbox["branch_name"],
+                )
+            return {
+                "has_changes": False,
+                "commit_created": False,
+                "commit_message": "",
+                "push_attempted": False,
+                "push_completed": False,
+                "cleanup_completed": task.cleanup_worktree,
+                "pr_url": "",
+                "status": "",
+                "diff": "",
+            }
+
         logger.info(
             "worker post-run diff evaluated",
             extra={

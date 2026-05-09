@@ -102,6 +102,57 @@ Do NOT describe what you plan to do and then stop. Write the actual code.
 """
 
 
+def _build_plan_prompt(
+    *,
+    task: AgentTaskRequest,
+    sandbox: dict[str, Any],
+    agents_md: str,
+    repository: str,
+) -> str:
+    worktree_path = sandbox.get("worktree_path") or task.workspace_path or "."
+    base_branch = task.base_branch or "main"
+
+    if agents_md:
+        agents_md_section = f"## Repository Rules (AGENTS.md)\n\n{agents_md}"
+    else:
+        agents_md_section = "## Repository Rules\n\nNo AGENTS.md found. Apply general best practices."
+
+    return f"""## Working Environment
+
+You are operating in a git worktree at `{worktree_path}`.
+Repository: `{repository or "unknown"}`, base branch: `{base_branch}`.
+
+{agents_md_section}
+
+## Planning Mode
+
+You are in PLANNING MODE. Your job is to analyze the codebase and produce a detailed
+implementation plan. You MUST NOT modify, create, or delete any files.
+
+Allowed actions: read files, list directories, run read-only commands (grep, find, cat, git log).
+Forbidden actions: write, edit, create, delete, or any command that modifies the filesystem.
+
+## Plan Format
+
+Produce your plan as structured markdown with these sections:
+
+### Scope
+What will change and what will not change.
+
+### Files to Modify
+A bullet list of file paths with a one-line description of the change.
+
+### Implementation Approach
+Step-by-step description of what the implementation will do.
+
+### Edge Cases and Risks
+Any non-obvious issues, compatibility concerns, or things to watch out for.
+
+After writing your plan, end with exactly this line:
+> Reply with `@knight CONFIRM` to start implementation.
+"""
+
+
 def _map_status(agent_end_event: dict[str, Any]) -> str:
     # returncode is always -9 (SIGKILL) since we kill after agent_end — ignore it
     if not agent_end_event:
@@ -172,7 +223,7 @@ class PiAgentRunner:
             session_file_name, session_data = existing_session
             (session_dir / session_file_name).write_text(session_data, encoding="utf-8")
 
-        if is_continuation:
+        if is_continuation and task.execution_mode != "plan":
             # Session has full context — send the new comment with a workspace reminder and standards
             full_prompt = (
                 f"[Workspace: `{worktree_path}`, branch: `{sandbox.get('branch_name', '')}`]\n\n"
@@ -182,18 +233,43 @@ class PiAgentRunner:
                 f"After implementing, re-read every file you modified and verify the result is correct and complete."
             ).strip()
         else:
-            # First run — send full working environment context + task
-            system_prompt = _build_pi_prompt(
-                task=task,
-                sandbox=sandbox,
-                agents_md=agents_md,
-                repository=repository,
-                is_continuation=False,
-            )
-            if task.issue_context:
-                first_message = f"{task.issue_context}\n\n---\n\n{task.instructions}".strip()
+            if task.execution_mode == "plan":
+                system_prompt = _build_plan_prompt(
+                    task=task,
+                    sandbox=sandbox,
+                    agents_md=agents_md,
+                    repository=repository,
+                )
+                first_message = (
+                    f"{task.issue_context}\n\n---\n\n{task.instructions}".strip()
+                    if task.issue_context
+                    else task.instructions
+                )
             else:
-                first_message = task.instructions
+                # First run — send full working environment context + task
+                system_prompt = _build_pi_prompt(
+                    task=task,
+                    sandbox=sandbox,
+                    agents_md=agents_md,
+                    repository=repository,
+                    is_continuation=False,
+                )
+                if task.plan_context:
+                    issue_part = (
+                        f"{task.issue_context}\n\n---\n\n{task.instructions}".strip()
+                        if task.issue_context
+                        else task.instructions
+                    )
+                    first_message = (
+                        f"## Approved Plan\n\n{task.plan_context}\n\n"
+                        f"---\n\n"
+                        f"The above plan has been approved. Implement it exactly as described.\n\n"
+                        f"{issue_part}"
+                    )
+                elif task.issue_context:
+                    first_message = f"{task.issue_context}\n\n---\n\n{task.instructions}".strip()
+                else:
+                    first_message = task.instructions
             full_prompt = f"{system_prompt}\n\n## Task\n\n{first_message}"
 
         timeout_seconds = runtime_config.max_steps * runtime_config.command_timeout_seconds
@@ -339,11 +415,12 @@ class PiAgentRunner:
         stderr_output = proc.stderr.read() if proc.stderr else ""
 
         # Save session to DB, then clean up temp dir
+        # Skip saving for plan mode — the planning session is irrelevant to the implementation run.
         try:
             session_files = sorted(
                 session_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True
             )
-            if session_files and task.issue_id:
+            if session_files and task.issue_id and task.execution_mode != "plan":
                 sf = session_files[0]
                 session_store.save(task.issue_id, sf.name, sf.read_text(encoding="utf-8"))
         except Exception:

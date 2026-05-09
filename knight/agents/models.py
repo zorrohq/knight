@@ -22,6 +22,8 @@ class AgentTaskRequest(BaseModel):
     author_email: str = ""
     trigger_comment_id: int | None = None
     cloud_job_id: str = ""
+    execution_mode: str = "implement"   # "plan" | "implement"
+    plan_context: str = ""              # approved plan text; passed to implement phase
 
 
 class ToolResult(BaseModel):

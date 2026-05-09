@@ -25,6 +25,7 @@ class BranchRecord(BaseModel):
     pr_number: int | None = None
     provider: str = "github"
     status: str = "open"
+    plan_text: str = ""
     created_at: str = Field(default_factory=_utc_now)
     updated_at: str = Field(default_factory=_utc_now)
 
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS agent_branches (
     pr_number    INTEGER,
     provider     TEXT NOT NULL DEFAULT 'github',
     status       TEXT NOT NULL DEFAULT 'open',
+    plan_text    TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
     PRIMARY KEY (repository, issue_id, agent_branch)
@@ -55,6 +57,10 @@ class BranchStateStore:
         with self._lock:
             with self._conn() as conn:
                 conn.execute(_CREATE_TABLE)
+                try:
+                    conn.execute("ALTER TABLE agent_branches ADD COLUMN plan_text TEXT NOT NULL DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, timeout=10)
@@ -79,19 +85,20 @@ class BranchStateStore:
                 """
                 INSERT INTO agent_branches
                     (repository, issue_id, base_branch, agent_branch,
-                     pr_number, provider, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     pr_number, provider, status, plan_text, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(repository, issue_id, agent_branch) DO UPDATE SET
                     base_branch = excluded.base_branch,
                     pr_number   = excluded.pr_number,
                     provider    = excluded.provider,
                     status      = excluded.status,
+                    plan_text   = excluded.plan_text,
                     updated_at  = excluded.updated_at
                 """,
                 (
                     record.repository, record.issue_id, record.base_branch,
                     record.agent_branch, record.pr_number, record.provider,
-                    record.status, record.created_at or now, now,
+                    record.status, record.plan_text, record.created_at or now, now,
                 ),
             )
             row = conn.execute(
@@ -100,6 +107,16 @@ class BranchStateStore:
                 (record.repository, record.issue_id, record.agent_branch),
             ).fetchone()
         return BranchRecord(**dict(row))
+
+    def get_pending_plan(self, *, repository: str, issue_id: str) -> BranchRecord | None:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM agent_branches "
+                "WHERE repository=? AND issue_id=? AND status='pending_confirmation' "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (repository, issue_id),
+            ).fetchone()
+        return BranchRecord(**dict(row)) if row else None
 
     def mark_branch_status(
         self,
