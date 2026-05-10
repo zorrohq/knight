@@ -118,23 +118,30 @@ def _resolve_execution_mode(
     """Detect PLAN / NO-PLAN / CONFIRM keywords in task instructions and set execution_mode.
 
     Called for issue_comment tasks when the cloud dispatcher hasn't already set
-    execution_mode (it always defaults to 'implement'). We mirror the logic from
-    the local webhook router so self-hosted and cloud modes behave identically.
+    execution_mode (it always defaults to 'implement').
 
-    CONFIRM is checked first and independently — it doesn't require plan_mode
-    config to be true, because the user may have triggered plan mode adhoc via
-    "@knight PLAN" in a prior comment.
+    Priority order:
+      1. CONFIRM with a pending plan → implement with plan context
+      2. NO-PLAN / NOPLAN → force implement (escapes sticky plan mode)
+      3. Pending plan exists (no CONFIRM) → stay in plan mode (refine)
+      4. Explicit PLAN keyword or config → enter plan mode
+      5. Otherwise → implement (default)
     """
     instructions = task.instructions or ""
 
-    # 1. CONFIRM — check first, independent of plan_mode config.
-    #    If a pending plan exists for this issue, implement it.
-    if "CONFIRM" in instructions and task.issue_id and "#" in task.issue_id:
+    # Helper: look up a pending plan for this issue.
+    def _get_pending() -> "BranchRecord | None":
+        if not (task.issue_id and "#" in task.issue_id):
+            return None
         from knight.utils.local.state_store import BranchStateStore
         repo = task.issue_id.rsplit("#", 1)[0]
-        pending = BranchStateStore().get_pending_plan(
+        return BranchStateStore().get_pending_plan(
             repository=repo, issue_id=task.issue_id
         )
+
+    # 1. CONFIRM — implement the pending plan.
+    if "CONFIRM" in instructions:
+        pending = _get_pending()
         if pending:
             return task.model_copy(update={
                 "execution_mode": "implement",
@@ -143,15 +150,22 @@ def _resolve_execution_mode(
             })
         # No pending plan — fall through to normal detection
 
-    # 2. NO-PLAN / NOPLAN → force implement, skip plan mode entirely.
-    no_plan = "NO-PLAN" in instructions or "NOPLAN" in instructions
-    if no_plan:
+    # 2. NO-PLAN / NOPLAN → force implement, escapes sticky plan mode.
+    if "NO-PLAN" in instructions or "NOPLAN" in instructions:
         return task
 
-    # 3. Explicit PLAN keyword or config-based plan mode.
-    explicit_plan = "PLAN" in instructions
-    cfg_plan_mode = cfg.get_bool(key="plan_mode", default=False)
-    if explicit_plan or cfg_plan_mode:
+    # 3. Sticky plan mode — a pending plan exists, so any non-CONFIRM reply
+    #    stays in plan mode and refines the existing plan.
+    pending = _get_pending()
+    if pending:
+        return task.model_copy(update={
+            "execution_mode": "plan",
+            "plan_context": pending.plan_text,
+            "branch_name": task.branch_name or pending.agent_branch,
+        })
+
+    # 4. Explicit PLAN keyword or config-based plan mode → enter plan mode.
+    if "PLAN" in instructions or cfg.get_bool(key="plan_mode", default=False):
         return task.model_copy(update={"execution_mode": "plan"})
 
     return task
@@ -183,8 +197,7 @@ def run_agent_task(
 
     # Resolve plan mode from instructions when the cloud dispatched the task
     # without execution_mode set (cloud webhook handler doesn't know about it).
-    # Only applies to issue_comment tasks where the caller didn't already set a mode.
-    if task.task_type == "issue_comment" and task.execution_mode == "implement":
+    if task.execution_mode == "implement":
         task = _resolve_execution_mode(task, cfg)
 
     repository_identity = normalize_repository_identity(
@@ -226,10 +239,18 @@ def run_agent_task(
             },
         )
 
-        # Plan mode: clear any prior session so the agent starts fresh
+        # Plan mode: clear any prior session so the agent starts fresh.
+        # If refining an existing plan, seed PLAN.md in the worktree so the
+        # agent can read/edit it directly instead of receiving it in the prompt.
         if prepared_task.execution_mode == "plan":
             from knight.utils.local.session_store import AgentSessionStore
             AgentSessionStore().delete(prepared_task.issue_id)
+            if prepared_task.plan_context and sandbox.get("worktree_path"):
+                plan_path = Path(sandbox["worktree_path"]) / "PLAN.md"
+                try:
+                    plan_path.write_text(prepared_task.plan_context, encoding="utf-8")
+                except OSError:
+                    logger.warning("failed to seed PLAN.md in worktree", exc_info=True)
 
         agent = CodingAgentService()
         result = agent.run(prepared_task, sandbox=sandbox, log_config=log_config)

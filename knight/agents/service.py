@@ -219,11 +219,22 @@ class PiAgentRunner:
                     agents_md=agents_md,
                     repository=repository,
                 )
-                first_message = (
+                issue_part = (
                     f"{task.issue_context}\n\n---\n\n{task.instructions}".strip()
                     if task.issue_context
                     else task.instructions
                 )
+                if task.plan_context:
+                    # Refinement: PLAN.md was seeded in the worktree by run_agent_task.
+                    # Just point the agent at it — saves tokens vs embedding the full plan.
+                    first_message = (
+                        f"PLAN.md already exists with the current plan. "
+                        f"Read it, then update it to address the user's feedback below. "
+                        f"Call knight_plan_done when done.\n\n"
+                        f"{issue_part}"
+                    )
+                else:
+                    first_message = issue_part
             else:
                 # First run — send full working environment context + task
                 system_prompt = _build_pi_prompt(
