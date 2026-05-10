@@ -172,10 +172,18 @@ def _extract_task(
         issue_title: str = issue.get("title", "")
         issue_body: str = issue.get("body") or ""
 
+        # Determine effective plan mode.
+        # NO-PLAN / NOPLAN → force implement (overrides config).
+        # PLAN (without NO-PLAN/NOPLAN) → force plan mode (overrides config).
+        # Otherwise fall back to the configured plan_mode setting.
+        no_plan = "NO-PLAN" in clean_comment or "NOPLAN" in clean_comment
+        explicit_plan = not no_plan and "PLAN" in clean_comment
         cfg_plan_mode = _cfg.get_bool(key="plan_mode", default=False)
+        in_plan_mode = not no_plan and (explicit_plan or cfg_plan_mode)
+
         execution_mode = "implement"
 
-        if cfg_plan_mode:
+        if in_plan_mode:
             is_confirm = "CONFIRM" in clean_comment
 
             if is_confirm:
