@@ -235,9 +235,17 @@ def run_agent_task(
         result = agent.run(prepared_task, sandbox=sandbox, log_config=log_config)
 
         # Plan mode: read PLAN.md NOW, before finalize_task removes the worktree.
+        # If PLAN.md is missing the agent didn't follow instructions — retry once.
         plan_text_for_comment = ""
         if prepared_task.execution_mode == "plan":
             plan_text_for_comment = _read_plan_file(result.sandbox)
+            if not plan_text_for_comment:
+                logger.warning(
+                    "plan mode: PLAN.md missing after agent run, retrying",
+                    extra={"issue_id": prepared_task.issue_id},
+                )
+                result = agent.run(prepared_task, sandbox=sandbox, log_config=log_config)
+                plan_text_for_comment = _read_plan_file(result.sandbox)
             if not plan_text_for_comment:
                 plan_text_for_comment = result.final_message
 
