@@ -57,6 +57,14 @@ class AgentSessionStore:
             logger.warning("failed to load session for %s", issue_id, exc_info=True)
         return None
 
+    def delete(self, issue_id: str) -> None:
+        """Delete the session file for this issue, if it exists."""
+        path = self._sessions_dir / f"{_slug(issue_id)}.jsonl"
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("failed to delete session for %s", issue_id, exc_info=True)
+
     def save(self, issue_id: str, session_file_name: str, session_data: str) -> None:
         """Persist session data for this issue, trimming if it exceeds the size cap."""
         session_data = _trim_session(session_data, _MAX_SESSION_BYTES)
