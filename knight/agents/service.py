@@ -126,30 +126,9 @@ Repository: `{repository or "unknown"}`, base branch: `{base_branch}`.
 
 ## Planning Mode
 
-You are in PLANNING MODE. Your job is to analyze the codebase and produce a detailed
-implementation plan. You MUST NOT modify, create, or delete any files.
-
-Allowed actions: read files, list directories, run read-only commands (grep, find, cat, git log).
-Forbidden actions: write, edit, create, delete, or any command that modifies the filesystem.
-
-## Plan Format
-
-Produce your plan as structured markdown with these sections:
-
-### Scope
-What will change and what will not change.
-
-### Files to Modify
-A bullet list of file paths with a one-line description of the change.
-
-### Implementation Approach
-Step-by-step description of what the implementation will do.
-
-### Edge Cases and Risks
-Any non-obvious issues, compatibility concerns, or things to watch out for.
-
-After writing your plan, end with exactly this line:
-> Reply with `@knight CONFIRM` to start implementation.
+You are in PLANNING MODE. Analyze the codebase and produce a detailed implementation plan.
+The plan extension handles file-write restrictions and session termination — just focus on
+exploring the code and writing a thorough plan to PLAN.md.
 """
 
 
@@ -274,11 +253,13 @@ class PiAgentRunner:
 
         timeout_seconds = runtime_config.max_steps * runtime_config.command_timeout_seconds
         pi_model_id = f"{pi_provider}/{model}"
+        _plan_extension_path = Path(__file__).parent / "plan_extension.ts"
         cmd = [
             pi_path, "--mode", "rpc",
             "--session-dir", str(session_dir),
             "--provider", pi_provider,
             "--model", model,
+            *(["-e", str(_plan_extension_path)] if task.execution_mode == "plan" else []),
         ]
 
         logger.info(
@@ -325,14 +306,15 @@ class PiAgentRunner:
         assert proc.stdin is not None
         proc.stdin.write(json.dumps({"type": "set_auto_compaction", "enabled": True}) + "\n")
         proc.stdin.write(json.dumps({"type": "set_auto_retry", "enabled": True}) + "\n")
-        proc.stdin.write(json.dumps({
-            "type": "follow_up",
-            "message": (
-                "Review your work before finishing: re-read every file you modified. "
-                "Check for syntax errors, broken structure, incomplete changes, and regressions. "
-                "Fix anything that is wrong or missing. Only stop when the task is fully done."
-            ),
-        }) + "\n")
+        if task.execution_mode != "plan":
+            proc.stdin.write(json.dumps({
+                "type": "follow_up",
+                "message": (
+                    "Review your work before finishing: re-read every file you modified. "
+                    "Check for syntax errors, broken structure, incomplete changes, and regressions. "
+                    "Fix anything that is wrong or missing. Only stop when the task is fully done."
+                ),
+            }) + "\n")
 
         if is_continuation and existing_session:
             # switch_session does async file I/O internally — if we send the prompt immediately,

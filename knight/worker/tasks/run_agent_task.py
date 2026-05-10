@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -50,6 +51,20 @@ def _report_job_result(
         logger.exception("failed to report job result to cloud", extra={"job_id": job_id})
 
 
+def _read_plan_file(sandbox: dict) -> str:
+    """Read PLAN.md written by the planning agent from the worktree."""
+    worktree_path = sandbox.get("worktree_path", "")
+    if not worktree_path:
+        return ""
+    try:
+        plan_path = Path(worktree_path) / "PLAN.md"
+        if plan_path.is_file():
+            return plan_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        logger.warning("failed to read PLAN.md from worktree", exc_info=True)
+    return ""
+
+
 def _post_plan_comment(task: AgentTaskRequest, plan_text: str) -> None:
     """Post the agent's plan as a GitHub issue comment."""
     if not (task.github_token and task.issue_id and "#" in task.issue_id):
@@ -96,6 +111,52 @@ def _post_error_comment(task: AgentTaskRequest, message: str) -> None:
         logger.exception("failed to post error comment to GitHub")
 
 
+def _resolve_execution_mode(
+    task: AgentTaskRequest,
+    cfg: ConfigStore,
+) -> AgentTaskRequest:
+    """Detect PLAN / NO-PLAN / CONFIRM keywords in task instructions and set execution_mode.
+
+    Called for issue_comment tasks when the cloud dispatcher hasn't already set
+    execution_mode (it always defaults to 'implement'). We mirror the logic from
+    the local webhook router so self-hosted and cloud modes behave identically.
+
+    CONFIRM is checked first and independently — it doesn't require plan_mode
+    config to be true, because the user may have triggered plan mode adhoc via
+    "@knight PLAN" in a prior comment.
+    """
+    instructions = task.instructions or ""
+
+    # 1. CONFIRM — check first, independent of plan_mode config.
+    #    If a pending plan exists for this issue, implement it.
+    if "CONFIRM" in instructions and task.issue_id and "#" in task.issue_id:
+        from knight.utils.local.state_store import BranchStateStore
+        repo = task.issue_id.rsplit("#", 1)[0]
+        pending = BranchStateStore().get_pending_plan(
+            repository=repo, issue_id=task.issue_id
+        )
+        if pending:
+            return task.model_copy(update={
+                "execution_mode": "implement",
+                "plan_context": pending.plan_text,
+                "branch_name": task.branch_name or pending.agent_branch,
+            })
+        # No pending plan — fall through to normal detection
+
+    # 2. NO-PLAN / NOPLAN → force implement, skip plan mode entirely.
+    no_plan = "NO-PLAN" in instructions or "NOPLAN" in instructions
+    if no_plan:
+        return task
+
+    # 3. Explicit PLAN keyword or config-based plan mode.
+    explicit_plan = "PLAN" in instructions
+    cfg_plan_mode = cfg.get_bool(key="plan_mode", default=False)
+    if explicit_plan or cfg_plan_mode:
+        return task.model_copy(update={"execution_mode": "plan"})
+
+    return task
+
+
 @celery_app.task(
     bind=True,
     name="knight.worker.tasks.run_agent_task",
@@ -119,6 +180,13 @@ def run_agent_task(
     cfg = ConfigStore()
     _cloud_url = cfg.get_string(key="cloud_url", default="https://knight.zorro.works")
     _daemon_token = cfg.get_string(key="daemon_token")
+
+    # Resolve plan mode from instructions when the cloud dispatched the task
+    # without execution_mode set (cloud webhook handler doesn't know about it).
+    # Only applies to issue_comment tasks where the caller didn't already set a mode.
+    if task.task_type == "issue_comment" and task.execution_mode == "implement":
+        task = _resolve_execution_mode(task, cfg)
+
     repository_identity = normalize_repository_identity(
         repository_url=task.repository_url,
         repository_local_path=task.repository_local_path,
@@ -130,6 +198,7 @@ def run_agent_task(
             "repository": repository_identity,
             "issue_id": task.issue_id,
             "task_type": task.task_type,
+            "execution_mode": task.execution_mode,
         },
     )
 
@@ -165,6 +234,13 @@ def run_agent_task(
         agent = CodingAgentService()
         result = agent.run(prepared_task, sandbox=sandbox, log_config=log_config)
 
+        # Plan mode: read PLAN.md NOW, before finalize_task removes the worktree.
+        plan_text_for_comment = ""
+        if prepared_task.execution_mode == "plan":
+            plan_text_for_comment = _read_plan_file(result.sandbox)
+            if not plan_text_for_comment:
+                plan_text_for_comment = result.final_message
+
         git_ops = WorkerGitOpsService()
         post_run = git_ops.finalize_task(
             task=prepared_task,
@@ -172,9 +248,9 @@ def run_agent_task(
             agent_pr_url=result.pr_url,
         )
 
-        # Plan mode: post the plan as a comment and save pending_confirmation state
+        # Plan mode: post the plan comment and save pending_confirmation state.
         if prepared_task.execution_mode == "plan":
-            _post_plan_comment(prepared_task, result.final_message)
+            _post_plan_comment(prepared_task, plan_text_for_comment)
             if repository_identity and prepared_task.issue_id:
                 from knight.utils.local.state_store import BranchRecord, BranchStateStore
                 BranchStateStore().upsert_branch(BranchRecord(
@@ -183,7 +259,7 @@ def run_agent_task(
                     base_branch=prepared_task.base_branch,
                     agent_branch=prepared_task.branch_name,
                     status="pending_confirmation",
-                    plan_text=result.final_message,
+                    plan_text=plan_text_for_comment,
                 ))
 
     except SoftTimeLimitExceeded:
