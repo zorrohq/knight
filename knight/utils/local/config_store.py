@@ -40,6 +40,7 @@ _KEY_MAP: dict[str, str] = {
     "agent_blocked_command_prefixes": "blocked_command_prefixes",
     # GitHub auth — config.json uses "trigger_keyword", internal key is the longer form
     "github_trigger_keyword": "trigger_keyword",
+    "plan_mode": "plan_mode",
     # Cloud daemon settings
     "daemon_token": "daemon_token",
     "cloud_url": "cloud_url",
