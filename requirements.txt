@@ -80,8 +80,6 @@ google-auth==2.49.2
     # via google-genai
 google-genai==1.73.1
     # via langchain-google-genai
-greenlet==3.4.0
-    # via sqlalchemy
 h11==0.16.0
     # via
     #   httpcore
@@ -136,9 +134,7 @@ langchain-google-genai==4.2.1
 langchain-openai==1.1.15
     # via knight (pyproject.toml)
 langgraph==1.1.6
-    # via
-    #   knight (pyproject.toml)
-    #   langchain
+    # via langchain
 langgraph-checkpoint==4.0.1
     # via
     #   langgraph
@@ -172,10 +168,6 @@ packaging==26.0
     #   langsmith
 prompt-toolkit==3.0.52
     # via click-repl
-psycopg==3.3.3
-    # via knight (pyproject.toml)
-psycopg-binary==3.3.3
-    # via psycopg
 pyasn1==0.6.3
     # via pyasn1-modules
 pyasn1-modules==0.4.2
@@ -210,8 +202,6 @@ pygments==2.20.0
     # via rich
 pyjwt==2.12.1
     # via knight (pyproject.toml)
-pymysql==1.1.2
-    # via knight (pyproject.toml)
 python-dateutil==2.9.0.post0
     # via celery
 python-dotenv==1.2.2
@@ -220,8 +210,6 @@ python-dotenv==1.2.2
     #   uvicorn
 python-multipart==0.0.26
     # via fastapi
-python-tds==1.17.1
-    # via knight (pyproject.toml)
 pyyaml==6.0.3
     # via
     #   langchain-core
@@ -265,8 +253,6 @@ sniffio==1.3.1
     #   openai
 soupsieve==2.8.3
     # via beautifulsoup4
-sqlalchemy==2.0.49
-    # via knight (pyproject.toml)
 starlette==1.0.0
     # via fastapi
 tenacity==9.1.4
@@ -293,7 +279,6 @@ typing-extensions==4.15.0
     #   pydantic-core
     #   pydantic-extra-types
     #   rich-toolkit
-    #   sqlalchemy
     #   typing-inspection
 typing-inspection==0.4.2
     # via
