@@ -25,6 +25,8 @@ class WorkerSettings(BaseSettings):
     worker_git_user_name: str = "Knight Bot"
     worker_git_user_email: str = "knight@example.com"
     worker_commit_max_diff_chars: int = 20000
+    worker_task_soft_time_limit: int = 8400   # 140 min
+    worker_task_hard_time_limit: int = 9000   # 150 min
     github_token: str = ""
 
 

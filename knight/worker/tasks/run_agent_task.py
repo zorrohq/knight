@@ -13,6 +13,7 @@ from knight.runtime.logging_config import get_logger, setup_logging
 from knight.runtime.repository_identity import normalize_repository_identity
 from knight.utils.local.config_store import ConfigStore
 from knight.worker.celery_app import _DLQ_QUEUE, celery_app
+from knight.worker.config import settings
 from knight.worker.git_ops import WorkerGitOpsService
 from knight.worker.runtime import WorkerRuntimeService
 
@@ -178,8 +179,9 @@ def _resolve_execution_mode(
     # Hard safety net above pi's own timeout (25 steps * 300s = 7500s).
     # soft_time_limit raises SoftTimeLimitExceeded for graceful cleanup;
     # time_limit is the absolute kill, preventing zombie worker slots.
-    soft_time_limit=8400,  # 140 min
-    time_limit=9000,        # 150 min
+    # Configurable via WORKER_TASK_SOFT_TIME_LIMIT / WORKER_TASK_HARD_TIME_LIMIT env vars.
+    soft_time_limit=settings.worker_task_soft_time_limit,
+    time_limit=settings.worker_task_hard_time_limit,
     acks_late=True,
     reject_on_worker_lost=True,
     # One retry for transient infra failures (DB down, clone error, etc.).
