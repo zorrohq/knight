@@ -6,8 +6,6 @@ import subprocess
 
 from knight.agents.models import AgentTaskRequest
 from knight.runtime.authorship import (
-    KNIGHT_BOT_EMAIL,
-    KNIGHT_BOT_NAME,
     CollaboratorIdentity,
     add_coauthor_trailer,
     add_pr_collaboration_note,
