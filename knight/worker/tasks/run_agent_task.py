@@ -1,3 +1,4 @@
+import traceback
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -334,6 +335,7 @@ def run_agent_task(
                 "payload": dict(payload or {}),
                 "error_type": type(exc).__name__,
                 "error_message": str(exc),
+                "error_traceback": traceback.format_exc(),
             },
             queue=_DLQ_QUEUE,
         )

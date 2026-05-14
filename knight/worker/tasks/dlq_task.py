@@ -25,6 +25,7 @@ def record_dlq_entry(
     payload: dict[str, Any],
     error_type: str,
     error_message: str,
+    error_traceback: str = "",
 ) -> dict[str, Any]:
     """Log and store a failed task payload for operator inspection."""
     redacted_payload = {**payload, "github_token": "<redacted>"}
@@ -36,6 +37,7 @@ def record_dlq_entry(
             "repository_url": payload.get("repository_url"),
             "error_type": error_type,
             "error_message": error_message,
+            "error_traceback": error_traceback,
         },
     )
     return {
@@ -43,4 +45,5 @@ def record_dlq_entry(
         "payload": redacted_payload,
         "error_type": error_type,
         "error_message": error_message,
+        "error_traceback": error_traceback,
     }
